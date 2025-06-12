@@ -29,6 +29,8 @@ def ApplyCurrentBakingPreset(self, context):
                 new_item.Naming = tempObj[property]["Naming"]
                 new_item.space = tempObj[property]["space"]
                 new_item.float = tempObj[property]["float"]
+                new_item.DName = tempObj[property]["DName"]
+                new_item.shaderNode = tempObj[property]["shaderNode"]
                 context.scene.bakingList_index = len(
                     context.scene.bakingList)-1
             setattr(context.scene, "BakePresetName", Path(file).stem)
@@ -84,7 +86,7 @@ class BAKE_OT_Save(bpy.types.Operator):
         tempDictionary = {}
         for bake in scene.bakingList:
             tempDictionary[bake.name] = {
-                "Naming": bake.naming, "enabled": bake.enabled, "space": bake.space, "float": bake.float}
+                "Naming": bake.naming, "enabled": bake.enabled, "space": bake.space, "float": bake.float, "shaderNode": bake.shaderNode,"DName": bake.DName}
         os.makedirs("folder", exist_ok=True)
         with open(f"./{folder}/{scene.BakePresetName}.json", "w") as jsonFile:
             json.dump(tempDictionary, jsonFile)
@@ -101,7 +103,9 @@ class CREATE_OT_BAKE(bpy.types.Operator):
         for name in scene.BakeTypes:
             new_item = scene.bakingList.add()
             new_item.name = name
-            new_item.naming = f"[Object]_{name}"
+            new_item.naming = f"[Object]_{new_item.name}"
+            new_item.DName = scene.BakeTypes[name]
+            new_item.shaderNode = scene.inputNodeNamesUi[name]
             scene.bakingListIndex = len(scene.bakingList)-1
             if (name in scene.ColorMaps):
                 new_item.space = "sRGB"
@@ -114,7 +118,8 @@ class BAKING_UL_List(bpy.types.UIList):
     bl_idname = "BAKING_UL_List"
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        layout.label(text=item.name, icon=item.icon)
+        layout.label(text=item.DName, icon=item.icon)
+        layout.label(text=item.shaderNode)
 
 
 class BakeObject(bpy.types.PropertyGroup):
@@ -128,7 +133,10 @@ class BakeObject(bpy.types.PropertyGroup):
         name="Enable Bake", default=False, description="Click to enable baking this")
     float: bpy.props.BoolProperty(
         name="32 bit", default=False, description="32 bit texture")
-
+    shaderNode: bpy.props.StringProperty(
+        name="Shader Node", default="BSDF_PRINCIPLED", description="Shader node type")
+    DName: bpy.props.StringProperty(
+        name="Display name", default="BSDF_PRINCIPLED", description="Display name of bake type")
 
 listOfClassSecond = [BAKE_OT_Save, BAKE_PT_PANEL,
                      BAKING_UL_List, CREATE_OT_BAKE]

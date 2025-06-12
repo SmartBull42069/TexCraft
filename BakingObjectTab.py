@@ -13,6 +13,7 @@ def GetUv(self,context):
         for uv in self.mesh.data.uv_layers:
             uvList.append((uv.name, uv.name, uv.name))
     return uvList
+
 class MyItem(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="Item Name", default="New Item")
     icon: bpy.props.StringProperty(name="Icon", default="OBJECT_DATAMODE")
@@ -23,7 +24,7 @@ class MyItem(bpy.types.PropertyGroup):
         name="Selected To active", default=False, update=ChangeToNone)
     useCage: bpy.props.BoolProperty(
         name="Cage Object", default=False, update=ChangeToNone)
-    uv:bpy.props.EnumProperty(name="UV Map",description="Uv To use for baking",items=GetUv())
+    uv:bpy.props.EnumProperty(name="UV Map",description="Uv To use for baking",items=GetUv)
 
 
 class MY_UL_List(bpy.types.UIList):
@@ -82,6 +83,7 @@ class Baking_OT_AddObject(bpy.types.Operator):
                 new_item.mesh = mesh
                 new_item.selected = None
                 new_item.cage = None
+                new_item.uv=mesh.data.uv_layers.active.name
         scene.my_items_index = len(scene.my_items)-1
         return {'FINISHED'}
 

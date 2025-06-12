@@ -14,6 +14,7 @@ def GetChannel(self, context):
 
 
 class MyPackedObject(bpy.types.PropertyGroup):
+    
     name: bpy.props.StringProperty(name="Item Name", default="New Item")
     icon: bpy.props.StringProperty(name="Icon", default="TEXTURE")
     Red: bpy.props.EnumProperty(name="Red", description="Red channel",

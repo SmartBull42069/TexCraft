@@ -21,7 +21,7 @@ def GetNeedColorRamp(mats: Material, bakeType, outPutSocket: NodeSocket):
         for position, positionValue in enumerate(bpy.context.scene.bakeTypeColorRamp[bakeType]["Positions"]):
             node.color_ramp.elements[position].position = positionValue
         CreatLink(mats, node, outPutSocket, "Fac")
-        return node.outputs["Color"]
+        return [node.outputs["Color"],node]
     return False
 
 
@@ -34,7 +34,7 @@ def GetNodeSocketFromRequire(mat: Material, bakeTypeInformation: str) -> NodeSoc
         if (inputs != "Empty"):
             CreatLink(mat, newNode,
                       bakeTypeInformation["Inputs"][inputs], inputs)
-    return newNode.outputs[bakeTypeInformation["OutPutSocket"]]
+    return [newNode.outputs[bakeTypeInformation["OutPutSocket"]],newNode]
 
 
 def PreBakeTypeCheck(input: NodeSocket):
@@ -173,7 +173,7 @@ def CreateUv(useUv: bool) -> List[MeshUVLoopLayer]:
     for obj in bpy.context.scene.my_items:
         mesh: Object = obj.mesh
         if (not useUv[mesh]):
-            meshListWithUv[mesh] = mesh.data.uv_layers.active
+            meshListWithUv[mesh]= mesh.data.uv_layers[obj.uv]
         else:
             New_Uv_map: MeshUVLoopLayer = mesh.data.uv_layers.new(
                 name=f"{mesh.name}_UV")
@@ -310,30 +310,39 @@ def BreakLink(ConnectionNode: Node, mats: Material, mapType: str):
         return breakedInputValue
 
 
-def CreatLink(mats: Material, InputValueNode: Node, OutPutValueNode: NodeSocket, mapType: str):
-    if ((type(OutPutValueNode) == float) or (type(OutPutValueNode) == int)):
-        if (InputValueNode.inputs[mapType].is_linked):
-            mats.node_tree.links.remove(
-                InputValueNode.inputs[mapType].links[0])
-        if (type(InputValueNode.inputs[mapType].default_value) == float or type(InputValueNode.inputs[mapType].default_value) == int):
-            InputValueNode.inputs[mapType].default_value = OutPutValueNode
-        else:
-            InputValueNode.inputs[mapType].default_value[:] = (
-                OutPutValueNode,)*len(InputValueNode.inputs[mapType].default_value[:])
-    elif (type(OutPutValueNode) == tuple):
-        if (InputValueNode.inputs[mapType].is_linked):
-            mats.node_tree.links.remove(
-                InputValueNode.inputs[mapType].links[0])
-        if (type(InputValueNode.inputs[mapType].default_value) == float or type(InputValueNode.inputs[mapType].default_value) == int):
-            InputValueNode.inputs[mapType].default_value = OutPutValueNode[0]
-        else:
-            InputValueNode.inputs[mapType].default_value[:] = OutPutValueNode
+def CreatLink(mats: Material, InputValueNode: Node, OutPutValueNode: NodeSocket, mapTypeOrSocket: str,yes=False):
+    if(type(mapTypeOrSocket)==str or type(mapTypeOrSocket)==int):
+        inputSocket=InputValueNode.inputs[mapTypeOrSocket]
     else:
-        input: NodeSocket = InputValueNode.inputs[mapType]
+        inputSocket=mapTypeOrSocket
+    if ((type(OutPutValueNode) == float) or (type(OutPutValueNode) == int)):
+        if (inputSocket.is_linked):
+            mats.node_tree.links.remove(
+                inputSocket.links[0])
+        if (type(inputSocket.default_value) == float or type(inputSocket.default_value) == int):
+            inputSocket.default_value = OutPutValueNode
+        else:
+            inputSocket.default_value[:] = (
+                OutPutValueNode,)*len(inputSocket.default_value[:])
+    elif (type(OutPutValueNode) == tuple):
+        if (inputSocket.is_linked):
+            mats.node_tree.links.remove(
+                inputSocket.links[0])
+        if (type(inputSocket.default_value) == float or type(inputSocket.default_value) == int):
+            inputSocket.default_value = OutPutValueNode[0]
+        else:
+            
+            for i,value in enumerate(OutPutValueNode):
+                inputSocket.default_value[i]=value
+    else:
+        input: NodeSocket = inputSocket
         mats.node_tree.links.new(input, OutPutValueNode)
+        if(yes):
+            j=OutPutValueNode.links[0].to_node
+            k=OutPutValueNode.links[0].from_node
 
 
-def GetInputNode(mats: Material, NodeType: str, bakeType=None) -> Node:
+def GetInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
     nodeGroupsList: List[Node] = []
     nodeList: List[Node] = []
     nodeList.extend(mats.node_tree.nodes)
@@ -345,17 +354,35 @@ def GetInputNode(mats: Material, NodeType: str, bakeType=None) -> Node:
                 # here maybe
                 continue
         if (node.type == NodeType):
-            return [node, mats]
+            if(bakeType in  bpy.context.scene.requireAdditionalNode):
+
+                connectToOutNode = GetNodeSocketFromRequire(
+                        mats, bpy.context.scene.requireAdditionalNode[bakeType])
+                deleteNode[mats]=connectToOutNode[1]
+                # nodesToDelete[bakeMat].append(connectToOutNode.node)
+                newSocket = GetNeedColorRamp(
+                        mats, bakeType, connectToOutNode[0])
+                if (newSocket != False):
+                        connectToOutNode = newSocket[0]
+                        deleteNode[mats]=newSocket[1]
+                        # nodesToDelete[bakeMat].append(newSocket.node)
+                else:
+                    connectToOutNode = connectToOutNode[0]
+                return [node, mats,connectToOutNode]
+            else :
+
+                value=GetInputValueRaw(bakeType,node)
+                return [node, mats, value]    
         elif (type(node) == bpy.types.ShaderNodeGroup):
             nodeGroupsList.append(node)
     for nodeGroup in nodeGroupsList:
-        result = GetInputNode(nodeGroup, NodeType, bakeType)
+        result = GetInputNode(nodeGroup, NodeType, bakeType,deleteNode)
         if (result != False):
             return result
     return False
 
 
-def GetAllInputNode(mats: Material, NodeType: str, bakeType: str = None) -> Node:
+def GetAllInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
     nodeGroupsList: List[Node] = []
     nodeList: List[Node] = []
     nodeList.extend(mats.node_tree.nodes)
@@ -366,27 +393,45 @@ def GetAllInputNode(mats: Material, NodeType: str, bakeType: str = None) -> Node
             if (node.type == "BUMP" and (node.inputs["Normal"].is_linked)):
                 # here maybe
                 continue
-            inputName = bpy.context.scene.inputNodeNames[bakeType]
+            
             propertyDependentInput = bpy.context.scene.propertyDependentInput
             if (bakeType in propertyDependentInput and propertyDependentInput[bakeType]["NodeType"] == NodeType):
                 propertyDependInfo = propertyDependentInput[bakeType]
                 if (getattr(node, propertyDependInfo["Property"]) not in propertyDependInfo["PropertyAccept"]):
+                    print(getattr(node, propertyDependInfo["Property"]))
+                    print(propertyDependInfo["PropertyAccept"])
                     # here maybe
                     continue
-            if (node.inputs[inputName].is_linked):
+            if(bakeType in  bpy.context.scene.requireAdditionalNode):
+                tempList=foundNodes.copy()
+                added=False
+                for items in foundNodes:
+                    if (items[1] == mats):
+                        tempList.append(
+                        [node, mats, items[2]])
+                    added=True
+                foundNodes = tempList
+                if(not added):
+                    connectToOutNode = GetNodeSocketFromRequire(
+                            mats, bpy.context.scene.requireAdditionalNode[bakeType])
+                    deleteNode[mats]=connectToOutNode[1]
+                    newSocket = GetNeedColorRamp(
+                            mats, bakeType, connectToOutNode[0])
+                    if (newSocket != False):
+                            connectToOutNode = newSocket[0]
+                            deleteNode[mats]=newSocket[1]
+                    else:
+                        connectToOutNode = connectToOutNode[0]
+                    foundNodes.append(
+                        [node, mats, connectToOutNode])
+            else :
+                value=GetInputValueRaw(bakeType,node)
                 foundNodes.append(
-                    [node, mats, node.inputs[inputName].links[0].from_socket])
-            else:
-                if (type(node.inputs[inputName].default_value) == int or type(node.inputs[inputName].default_value) == float):
-                    foundNodes.append(
-                        [node, mats, node.inputs[inputName].default_value])
-                else:
-                    foundNodes.append(
-                        [node, mats, node.inputs[inputName].default_value[:]])
+                [node, mats, value])
         elif (type(node) == bpy.types.ShaderNodeGroup):
             nodeGroupsList.append(node)
     for nodeGroup in nodeGroupsList:
-        result = GetAllInputNode(nodeGroup, NodeType, bakeType)
+        result = GetAllInputNode(nodeGroup, NodeType, bakeType,deleteNode)
         if (type(result) != List):
             foundNodes.extend(result)
     multipleNodeInfo = bpy.context.scene.multipleNode
@@ -401,9 +446,6 @@ def GetAllInputNode(mats: Material, NodeType: str, bakeType: str = None) -> Node
         return foundNodes
 
 
-def GetRequiredChannels():
-    requiredChannels = {"Emission": ["Emission Color", "Emission Strength"]}
-    return requiredChannels
 
 
 def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, udimCount: list[int],  imageObj, selected, existingImages=None):
@@ -415,9 +457,8 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
     allReadyHasSlectedImage = {}
     inputNodeType = bpy.context.scene.inputNode
     inputNodeName = bpy.context.scene.inputNodeNames
-    requiredChannels = GetRequiredChannels()
-    excludedChannels = {"Subsurface IOR": [], "Thin Film IOR": [], "Thin Film Thickness": [], "Sheen Tint": [], "Sheen Roughness": [], "Sheen Weight": [], "Coat Tint": [], "Coat IOR": [], "Coat Roughness": [], "Coat Weight": [], "Transmission Weight": [], "Anisotropic Rotation": [], "Anisotropic": [], "Specular Tint": [], "Specular IOR Level": [], "Subsurface Anisotropy": [], "Subsurface Scale": [], "Subsurface Weight": [], "Alpha": [], "Base Color": [],
-                        "Metallic": [], "Emission Color": [], "Roughness": [], "Emission Strength": [], "Displacement Height": [], "Displacement Scale": [], "Displacement Midlevel": [], "Material Output": [], "IOR": [], "Normal": []}
+    requiredChannels =bpy.context.scene.requiredChannels
+    excludedChannels = bpy.context.scene.excludedChannels.copy()
     if (bakeType in requiredChannels):
         for channels in requiredChannels[bakeType]:
             if (channels in excludedChannels):
@@ -431,24 +472,21 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
     matLen = mesh.data.materials.__len__()
     for matSlot in range(matLen):
         mats = mesh.data.materials[matSlot]
-        materialOutput = GetInputNode(mats, "OUTPUT_MATERIAL", bakeType)
+        materialOutput = GetInputNode(mats, "OUTPUT_MATERIAL", "Material OutPut Surface",nodesToDelete)
         ImageBakeData[mats] = []
         selectedToActiveDate[mats] = []
         defaultData[mats] = []
         if (selected != None):
             exclusionMat = selected.data.materials[matSlot]
             exclusionMaterialOutput = GetInputNode(
-                exclusionMat, "OUTPUT_MATERIAL", bakeType)
+                exclusionMat, "OUTPUT_MATERIAL", "Material OutPut Surface",nodesToDelete)
         else:
             exclusionMat = mats
             exclusionMaterialOutput = materialOutput
         if (mats != None):
-
             BakeInputNodes = GetAllInputNode(
-                mats, inputNodeType[bakeType], bakeType)
-
+                mats, inputNodeType[bakeType], bakeType,nodesToDelete)
             if (BakeInputNodes[0] == False):
-
                 continue  # here
 
             if (materialOutput == False):
@@ -564,12 +602,11 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                         if (shoulBake == False):
                             defaultData[mats].append([previouseState[1],
                                                       bakeMatToAdd, bakeNodeToAdd, mesh])
-
         if (not shoulBake and not imageObj.enabled):
             return None
         if (selected != None):
             BakeInputNodesToUse = GetAllInputNode(
-                exclusionMat, inputNodeType[bakeType], bakeType)
+                exclusionMat, inputNodeType[bakeType], bakeType,nodesToDelete)
         else:
             BakeInputNodesToUse = BakeInputNodes
         for BakeInputNode in BakeInputNodesToUse:
@@ -577,39 +614,16 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
             if (bakeMat not in nodesToDelete):
                 nodesToDelete[bakeMat] = []
 
-            if ((bakeType in bpy.context.scene.requiresMaterialOutPutConnection)):
-
-                requireNodeInfo = bpy.context.scene.requireAdditionalNode
-                if (bakeType in requireNodeInfo):
-                    connectToOutNode = GetNodeSocketFromRequire(
-                        bakeMat, requireNodeInfo[bakeType])
-                    nodesToDelete[bakeMat].append(connectToOutNode.node)
-                    newSocket = GetNeedColorRamp(
-                        bakeMat, bakeType, connectToOutNode)
-                    if (newSocket != False):
-                        connectToOutNode = newSocket
-                        nodesToDelete[bakeMat].append(newSocket.node)
-                else:
-                    connectToOutNode: Node = GetInputValue(
-                        bakeType, BakeInputNode)
-                for input in exclusionMaterialOutput[0].inputs:
-                    valueExcluded = BreakLink(
-                        exclusionMaterialOutput[0], exclusionMaterialOutput[1], input.name)
-                    if (valueExcluded):
-                        excludedChannels["Material Output"].append(
-                            ["ShaderNodeOutputMaterial", valueExcluded, exclusionMaterialOutput[1], input.name])
-                exclusionMaterialOutput[1].node_tree.nodes.remove(
-                    exclusionMaterialOutput[0])
-                materialOutputNew = BakeInputNode[1].node_tree.nodes.new(
-                    type="ShaderNodeOutputMaterial")
-                CreatLink(BakeInputNode[1], materialOutputNew,
-                          connectToOutNode, "Surface")
-                nodesToDelete[bakeMat].append(materialOutputNew)
-                break
-            elif (bakeType in bpy.context.scene.requiresConnection or bakeType in bpy.context.scene.requiresDefaultValue):
+            
+            if (bakeType in bpy.context.scene.requiresConnection or bakeType in bpy.context.scene.requiresDefaultValue):
+                
                 value = BakeInputNode[2]
+                nodeTocheck = BakeInputNode[0]
+                baseBakeInfo = bpy.context.scene.baseNode
+                if((BakeInputNode[0].type in baseBakeInfo)):
+                    nodeTocheck= BakeInputNode[0].outputs[baseBakeInfo[BakeInputNode[0].type]["Output"]].links[0].to_node
                 emissionNode: Node = bakeMat.node_tree.nodes.new(
-                    type="ShaderNodeEmission")
+                    type="ShaderNodeBsdfPrincipled")
                 defaultValue = None
                 connecton = None
                 if (bakeType in bpy.context.scene.requiresConnection):
@@ -617,30 +631,32 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
 
                 if (bakeType in bpy.context.scene.requiresDefaultValue):
                     defaultValue = bpy.context.scene.requiresDefaultValue[bakeType]
-                if (BakeInputNode[0].bl_idname in bpy.context.scene.ShaderNodes):
-                    nodeTocheck = BakeInputNode[0]
-                else:
-                    nodeTocheck = BakeInputNode[0].outputs[0].links[0].to_node
+
+                
+
                 inputSocket: NodeSocket = nodeTocheck.outputs[0].links[0].to_socket
+                
                 fromSocket: NodeSocket = nodeTocheck.outputs[0]
                 excludedNode: Node = nodeTocheck.outputs[0].links[0].to_node
-
+                if (bakeType in bpy.context.scene.ConvertInput):
+                    inputSocket=excludedNode.inputs[bpy.context.scene.ConvertInput[bakeType]]
+                    fromSocket=inputSocket.links[0].from_socket
                 nodesToDelete[bakeMat].append(emissionNode)
                 if (defaultValue):
-                    for input in defaultValue:
-                        emissionNode.inputs[input] = defaultValue[input]
+                    CreatLink(bakeMat, emissionNode, defaultValue, "Strength")
                 if (connecton):
                     CreatLink(bakeMat, emissionNode, value, connecton)
-                excludedChannels[inputSocket.name] = []
+                if(inputSocket.name not in excludedChannels):
+                    excludedChannels[inputSocket.name] = []
                 excludedChannels[inputSocket.name].append(
-                    [excludedNode, fromSocket, bakeMat, inputSocket.name])
-                bakeMat.node_tree.links.new(inputSocket,
-                                            emissionNode.outputs[0])
+                    [excludedNode, fromSocket, bakeMat, inputSocket])
+                CreatLink(bakeMat, inputSocket.node, emissionNode.outputs[0], inputSocket)
+                
 
             else:
                 for excludedChannel in excludedChannels:
                     baseBakeInfo = bpy.context.scene.baseNode
-                    if ((excludedChannel == "Material Output") or (bakeType not in bpy.context.scene.alwaysExcludedChannels and excludedChannel == bakeType)):
+                    if ((excludedChannel == "Material Output") or (excludedChannel == bakeType)):
                         excludedInputNode = False
                     elif (inputNodeType[excludedChannel] == inputNodeType[bakeType]):
                         excludedInputNode = BakeInputNode
@@ -649,14 +665,14 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                             BakeInputNode[0].outputs[baseBakeInfo[BakeInputNode[0].type]["Output"]].links[0].to_node, BakeInputNode[1]]
                     else:
                         excludedInputNode = False
-                    if (excludedChannel in bpy.context.scene.propertyDependentInput):
+                    if (excludedChannel in bpy.context.scene.propertyDependentInput and excludedInputNode!= False):
                         dependentPropertyInfo = bpy.context.scene.propertyDependentInput[
                             excludedChannel]
 
                         if ((excludedInputNode[0].type != dependentPropertyInfo["NodeType"]) or (getattr(excludedInputNode[0], dependentPropertyInfo["Property"]) not in dependentPropertyInfo["PropertyAccept"])):
                             excludedInputNode = False
                     if (excludedInputNode != False):
-
+                        print(excludedChannel)
                         inputName = inputNodeName[excludedChannel]
                         valueExcludedChannel = BreakLink(
                             excludedInputNode[0], excludedInputNode[1], inputName)
@@ -676,18 +692,34 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
         nodeMat: Material = ImageBakeData[mats]
         for items in nodeMat:
             node: ShaderNodeTexImage = items[0]
-            nodesToDelete[nodeMat].append(node)
+            nodesToDelete[items[1]].append(node)
 
     return [False, defaultData, excludedChannels, nodesToDelete]
 
-
+def GetInputValueRaw(BakeType: str, BakeInputNode: Node):
+    NodeSocketValue: NodeSocket = BakeInputNode.inputs[bpy.context.scene.inputNodeNames[
+        BakeType]]
+    
+    if (NodeSocketValue.is_linked):
+        Value = NodeSocketValue.links[0].from_socket
+        return Value
+    if(bpy.context.scene.inputNodeNames[BakeType]=="Surface"):
+        return False
+    valueToCheck = NodeSocketValue.default_value
+    if ((type(valueToCheck) == float) or (type(valueToCheck) == int)):
+        Value = valueToCheck
+    else:
+        Value = valueToCheck[:]
+    return Value
 def GetInputValue(BakeType: str, BakeInputNode: Node):
     NodeSocketValue: NodeSocket = BakeInputNode[0].inputs[bpy.context.scene.inputNodeNames[
         BakeType]]
-    valueToCheck = NodeSocketValue.default_value
+    
     if (NodeSocketValue.is_linked):
         Value = NodeSocketValue.links[0].from_socket
-    elif ((type(valueToCheck) == float) or (type(valueToCheck) == int)):
+        return Value
+    valueToCheck = NodeSocketValue.default_value
+    if ((type(valueToCheck) == float) or (type(valueToCheck) == int)):
         connectToOutNode: Node = BakeInputNode[1].node_tree.nodes.new(
             type="ShaderNodeValue")
         connectToOutNode.outputs[0].default_value = valueToCheck
@@ -710,11 +742,11 @@ def RestoreData(BakeType, excludedChannels, nodesToDelete):
                     if (node.image):
                         bpy.data.images.remove(node.image)
                 nodeMat.node_tree.nodes.remove(node)
-            except:
-                pass
+            except Exception as e:
+                print(e)
     for excludedChannel in excludedChannels:
         for excludedPairs in excludedChannels[excludedChannel]:
-            if ((excludedChannel != BakeType) or (BakeType in bpy.context.scene.alwaysExcludedChannels)):
+            if ((excludedChannel != BakeType) or (BakeType in bpy.context.scene.requiresConnection) or (BakeType in bpy.context.scene.requiresDefaultValue)):
                 if (type(excludedPairs[0]) == str):
                     if (not any(True for mat in createdOne if (excludedPairs[2] == mat) and (excludedPairs[0] == createdOne[mat].bl_idname))):
                         excludedPairs[0] = excludedPairs[2].node_tree.nodes.new(
@@ -986,7 +1018,6 @@ def BakingSetUp():
 def saveImage(image: Image, mats: Material, isPreBaked: bool, BakeType: str, mesh):
     imageFile = GetFilePath(mats, image.source == "TILED",
                             isPreBaked, BakeType, ".<UDIM>.", mesh, image.name)
-
     image.save(filepath=imageFile)
     if (image.source == "TILED"):
         imagesPath = {}
@@ -1057,19 +1088,6 @@ def GetImageName(mats, mesh, imageObj):
     return fileName
 
 
-def checkIfRequireAll(Mesh: Object):
-    inputNodes = bpy.context.scene.inputNodeNames
-
-    for BakeType in bpy.context.scene.BakeTypes:
-        if (bpy.context.scene.inputNode[BakeType] == "BSDF_PRINCIPLED"):
-            for mats in Mesh.data.materials:
-                result = GetAllInputNode(
-                    mats, "BSDF_PRINCIPLED", inputNodes[BakeType])
-                if (result != False):
-                    if (len(result) > 1):
-                        if (result[0] != False):
-                            return True
-    return False
 
 
 def GetColor(udimCount: int, channel, useUdim: bool):
@@ -1129,14 +1147,17 @@ def bake():
         Fliping(bakeDate, bakeDate[mats], mats)
         PackTexture(newCreatedMats, bakeDate, mats, createdJson)
         createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, True)
-    for mats in newCreatedMats:
-        for finalBakeType in newCreatedMats[mats]:
+    for mats in bakeDate:
+        for finalBakeType in bakeDate[mats]:
             try:
-                outputNode = newCreatedMats[mats][finalBakeType][0].node
-                if (outputNode.type == "TEX_IMAGE"):
-                    saveImage(outputNode.image, mats,
-                              False, finalBakeType, newCreatedMats[mats][finalBakeType][3])
-            except:
+                outputList = bakeDate[mats][finalBakeType]
+                for outPutValue in outputList:
+                    outputNode= outPutValue[0]
+                    if (outputNode.type == "TEX_IMAGE"):
+                        saveImage(outputNode.image, mats,
+                                False, finalBakeType, outPutValue[3])
+            except Exception as e:
+                print(f"{e}")
                 pass
     if (bpy.context.scene.ApplyMaterial or bpy.context.scene.ApplyToCopiedAndHideOriginal):
         ApplyMaterial(newCreatedMats)
@@ -1173,6 +1194,7 @@ def bake():
 
 
 def ApplyMaterial(newCreatedMats):
+    
     for mats in newCreatedMats:
         GetBlendings(newCreatedMats, mats)
         for finalBakeType in newCreatedMats[mats]:
@@ -1329,65 +1351,57 @@ def Invert(bakeDate, mats, bakeType):
 
 def GetBlendings(newCreatedMats, mats):
     blendingsDate = bpy.context.scene.Blending
-    alreadyHasValue = {}
-    alreadyAdded = {}
+
     for blendingBakesList in blendingsDate:
-        if (blendingsDate[blendingBakesList]["requirements"]):
-            hasRequiredBakeType = True
-            connectionObj = blendingsDate[blendingBakesList]["Connection"]
-            availableOnes = blendingsDate[blendingBakesList]["UsuallyAvailable"]
-            notAvailableBake = []
-            firstAvailableOne = None
-            for connection in connectionObj:
-                if (connectionObj[connection] not in newCreatedMats[mats]):
-                    hasRequiredBakeType = False
-                    notAvailableBake.append(connectionObj[connection])
-                elif ((firstAvailableOne == None) and (connectionObj[connection] not in availableOnes)):
-                    firstAvailableOne = []
-                    for items in newCreatedMats[mats][connectionObj[connection]]:
-                        firstAvailableOne.append(items.copy())
-            if ((firstAvailableOne != None) and (hasRequiredBakeType == False)):
-                for bakes in notAvailableBake:
-                    newCreatedMats[mats][bakes] = firstAvailableOne
-                    for index, items in enumerate(newCreatedMats[mats][bakes]):
-                        if (items[1] in alreadyHasValue):
-                            newCreatedMats[mats][bakes][index] = alreadyHasValue[items[1]]
-                        else:
-                            value = GetInputValue(
-                                bakes, [items[2], items[1]])
-                            newCreatedMats[mats][bakes][index] = value
-                            alreadyHasValue[items[1]] = value
-                    hasRequiredBakeType = True
-            if (hasRequiredBakeType):
-                connectNode = blendingsDate[blendingBakesList]["Node"]
-                outputSocketName = blendingsDate[blendingBakesList]["OutPutSocket"]
+        if (blendingBakesList in newCreatedMats[mats]):
+            connectionObj = blendingsDate[blendingBakesList]
+            properties = connectionObj["Properties"]
+            inputs = connectionObj["Inputs"]
+            alreadyAdded={}
+            bakeBlendBase="Base Color"
+            baseColorInput="Base Color"
+            exist=bakeBlendBase in newCreatedMats[mats]
+            for primaryBake in newCreatedMats[mats][blendingBakesList]:
+                
+                
+                if(exist):
+                    for blendTexture in newCreatedMats[mats][bakeBlendBase]:
+                        if ((blendTexture[1] == primaryBake[1]) and (blendTexture[2] == primaryBake[2])):
+                            j=blendTexture[0]
+                            if((blendTexture[1] in alreadyAdded) and (blendTexture[2] == alreadyAdded[blendTexture[1]][2])):
+                                blendTexture[0]=alreadyAdded[blendTexture[1]][0]
+                            else:
+                                createdNode = GetMixShader(connectionObj, properties, inputs, primaryBake)
+                                CreatLink(primaryBake[1],createdNode,blendTexture[0],"A")
+                                CreatLink(primaryBake[1],createdNode,primaryBake[0],"B")
+                                mats:Material= primaryBake[1]
+                                blendTexture[0]=createdNode.outputs[2]
+                                alreadyAdded[blendTexture[1]]=blendTexture
+                            k=blendTexture[0]
+                else:
+                    createdNode = GetMixShader(connectionObj, properties, inputs, primaryBake)
+                    inputValue=GetInputValue(baseColorInput,[primaryBake[2],primaryBake[1]])
+                    tempData=primaryBake.copy()
+                    CreatLink(primaryBake[1],createdNode,inputValue,"A")
+                    CreatLink(primaryBake[1],createdNode,primaryBake[0],"B")
+                    tempData[0] = createdNode.outputs[2]
+                    if(baseColorInput not in newCreatedMats[mats]):
+                        newCreatedMats[mats][baseColorInput] = []
+                    newCreatedMats[mats][baseColorInput].append(tempData)
+                    alreadyAdded[primaryBake[1]]=tempData
 
-                properties = blendingsDate[blendingBakesList]["Properties"]
-                inputs = blendingsDate[blendingBakesList]["Inputs"]
-                for items in newCreatedMats[mats]["Base Color"]:
-                    if (items[1] in alreadyAdded):
-                        items[0] = alreadyAdded[items[1]]
-                    else:
-                        createdNode: Node = items[1].node_tree.nodes.new(
-                            type=connectNode)
-                        for property in properties:
-                            setattr(createdNode, property,
-                                    properties[property])
-                        for input in inputs:
-                            CreatLink(items[1], createdNode,
-                                      inputs[input], input)
+            del newCreatedMats[mats][blendingBakesList]
 
-                        for connection in connectionObj:
-                            for newItems in newCreatedMats[mats][connectionObj[connection]]:
-                                if (items[1] == newItems[1]):
-                                    CreatLink(items[1], createdNode,
-                                              newItems[0], connection)
-                                    newItems[0] = createdNode.outputs[outputSocketName]
-                                    alreadyAdded[items[1]] = newItems[0]
-    for connection in connectionObj:
-        if (connectionObj[connection] != "Base Color"):
-            if (connectionObj[connection] in newCreatedMats[mats]):
-                del newCreatedMats[mats][connectionObj[connection]]
+def GetMixShader(connectionObj, properties, inputs, primaryBake):
+    createdNode: Node = primaryBake[1].node_tree.nodes.new(type=connectionObj["Node"])
+    for property in properties:
+        setattr(createdNode, property,
+                            properties[property])
+    for input in inputs:
+        CreatLink(primaryBake[1], createdNode,
+                                inputs[input], input)
+                    
+    return createdNode
 
 
 def createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, createJson):
@@ -1412,11 +1426,13 @@ def createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, createJson):
                         createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
                         createdJson[mats.name][bakedTextureType]["Tiled"] = False
                         createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
+                        createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
                     else:
                         createdJson[mats.name][bakedTextureType]["Tiled"] = True
                         createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
                         createdJson[mats.name][bakedTextureType]["value"] = {}
                         createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
+                        createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
                         for tile in value[1]:
                             valueToAdd = value[1][tile]
                             createdJson[mats.name][bakedTextureType]["value"][tile] = valueToAdd
@@ -1426,6 +1442,7 @@ def createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, createJson):
                     createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
                     createdJson[mats.name][bakedTextureType]["Tiled"] = False
                     createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
+                    createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
             newCreatedMats[mats][bakedTextureType].append([
                 outPutToAdd, items[1], items[2], items[3]])
 
@@ -1490,12 +1507,12 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
 
                         if (ChannelList[channel][0]):
                             createdJson[mats.name][channel] = {}
-
+                            name=item[3].name
                             for item in bakeDate[mats][channel]:
                                 if (type(item[0]) != int and type(item[0]) != float and item[0].bl_idname == "ShaderNodeTexImage"):
                                     if (item[0].image):
                                         bpy.data.images.remove(item[0].image)
-                                    bakeDate[mats][channel][1].node_tree.nodes.remove(
+                                    item[1].node_tree.nodes.remove(
                                         item[0])
                                 if (item[1] not in matColorSepNod):
 
@@ -1517,13 +1534,14 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
                                 if (channel not in newCreatedMats[mats]):
                                     newCreatedMats[mats][channel] = []
                                 newCreatedMats[mats][channel].append([
-                                    outPutToAdd, bakeDate[mats][channel][1], bakeDate[mats][channel][2], mesh])
+                                    outPutToAdd, item[1], item[2], item[3]])
+                                name=item[3].name
                             createdJson[mats.name][channel]["Channel"] = ChannelList[channel][1]
                             createdJson[mats.name][channel]["Tiled"] = True
                             createdJson[mats.name][channel]["value"] = {}
                             createdJson[mats.name][channel]["value"][tile] = savedFolder
-                            createdJson[mats.name][channel]["Mesh"] = mesh.name
-
+                            createdJson[mats.name][channel]["Mesh"] = name
+                            createdJson[mats.name][channel]["Shader"]=bakeDate[mats][channel][4].shaderNode
             else:
                 redCurrentColor = GetColor(
                     None, redChannel[0], redChannel[1])
@@ -1539,6 +1557,7 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
                 for channel in ChannelList:
                     if (ChannelList[channel][0]):
                         createdJson[mats.name][channel] = {}
+                        name=None
                         for items in bakeDate[mats][channel]:
                             if (type(items[0]) != int and type(items[0]) != float and items[0].bl_idname == "ShaderNodeTexImage"):
                                 if (items[0].image):
@@ -1565,11 +1584,13 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
                             if (channel not in newCreatedMats[mats]):
                                 newCreatedMats[mats][channel] = []
                             newCreatedMats[mats][channel].append(
-                                [outPutToAdd, items[1], items[2], mesh])
+                                [outPutToAdd, items[1], items[2], item[3]])
+                            name=item[3].name
                         createdJson[mats.name][channel]["Channel"] = ChannelList[channel][1]
                         createdJson[mats.name][channel]["Tiled"] = False
                         createdJson[mats.name][channel]["value"] = savedFolder
-                        createdJson[mats.name][channel]["Mesh"] = mesh.name
+                        createdJson[mats.name][channel]["Mesh"] = name
+                        createdJson[mats.name][channel]["Shader"]=bakeDate[mats][channel][4].shaderNode
             image = bpy.data.images.load(savedFolder, check_existing=True)
             if (useUdim):
                 image.source = "TILED"
@@ -1622,6 +1643,3 @@ def GetChannel(mats, bakeTexture, createdMaterial):
 
 
 bake()
-objectMats = bpy.context.object.data.materials[0].node_tree.nodes
-
-testList = []

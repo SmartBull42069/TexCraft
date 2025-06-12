@@ -168,7 +168,7 @@ def settingPropertyRegister():
     bpy.types.Scene.UseUdims = bpy.props.BoolProperty(
         name="Use Udims", default=False, description="Turn this on to use udims automatically")
     bpy.types.Scene.FileFormat = bpy.props.EnumProperty(name="File format", description="What file formate to use", items={
-        ("png", "png", "Save images as png"), ("tga", "tga", "Save images as tga")})
+        ("png", "png", "Save images as png"), ("tga", "tga", "Save images as tga"), ("exr", "exr", "Save images as exr"), ("jpg", "jpg", "Save images as jpg")})
     bpy.types.Scene.BakedImagesFilePath = "All Baked Images"
     bpy.types.Scene.PreBakedFilePath = "All Pre Baked Images"
     bpy.types.Scene.Device = bpy.props.EnumProperty(name="Device", description="Device to use for baking", items={
@@ -181,8 +181,7 @@ def settingPropertyRegister():
         name="Apply to copied object and hide original", default=False, description="Turn this on to copy the object, apply the copied material, and hide the original")
     bpy.types.Scene.CopyMaterial = bpy.props.BoolProperty(
         name="Copy material", default=True, description="turn this on to copy material before baking", update=SetCopiedMaterialDefault)
-    bpy.types.Scene.SpecifiedUv = bpy.props.IntProperty(
-        name="Uv to use", default=1, description="enter the index of the uv that you want to bake to", min=1, max=9)
+
     bpy.types.Scene.AntialiasingScale = bpy.props.FloatProperty(
         name="Anti aliasing", description="Less then 1 does downscaling, greater then 1 does upscaling,and at 1 does nothing", default=1, min=0, max=2)
     bpy.types.Scene.UVIslandMargin = bpy.props.FloatProperty(
@@ -225,7 +224,6 @@ def settingPropertyUnregister():
     del bpy.types.Scene.ApplyMaterial
     del bpy.types.Scene.ApplyToCopiedAndHideOriginal
     del bpy.types.Scene.CopyMaterial
-    del bpy.types.Scene.SpecifiedUv
     del bpy.types.Scene.AntialiasingScale
 
 
