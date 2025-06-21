@@ -8,8 +8,9 @@ from pathlib import Path
 def GetChannel(self, context):
     scene = context.scene
     tempList = [("None", "None", "None")]
-    for texture in scene.GreyScale:
-        tempList.append((f"{texture}", f"{texture}", f"Pack {texture}"))
+    for texture in scene.BakeTypes:
+        if(texture in scene.greyScale):
+            tempList.append((f"{texture}", f"{texture}", f"Pack {texture}"))
     return tempList
 
 
@@ -18,13 +19,13 @@ class MyPackedObject(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="Item Name", default="New Item")
     icon: bpy.props.StringProperty(name="Icon", default="TEXTURE")
     Red: bpy.props.EnumProperty(name="Red", description="Red channel",
-                                items=GetChannel, default=None,)
+                                items=GetChannel, default=1,)
     Green: bpy.props.EnumProperty(name="Red", description="Green channel",
-                                  items=GetChannel, default=None)
+                                  items=GetChannel, default=1)
     Blue: bpy.props.EnumProperty(name="Red", description="Blue channel",
-                                 items=GetChannel, default=None)
+                                 items=GetChannel, default=1)
     Alpha: bpy.props.EnumProperty(name="Red", description="Alpha channel",
-                                  items=GetChannel, default=None)
+                                  items=GetChannel, default=1)
     naming: bpy.props.StringProperty(name="Item Name", default="[Object]_PackedTexture",
                                      description="Specify the name and use the following notation for dynamic value\n[Object]=Object name\n[mat]=material name\n[Num]=A number generated if a image with the same name exist(if not specified and a image with the same name exist, then a number would added at the end)")
     space : bpy.props.EnumProperty(name="Color Space", description="Color space of the texture", items=[('ACES2065-1', 'ACES2065-1', 'Color space ACES2065-1'), ('ACEScg', 'ACEScg', 'Color space ACEScg'), ('AgX Base Display P3', 'AgX Base Display P3', 'Color space AgX Base Display P3'), ('AgX Base Rec.1886', 'AgX Base Rec.1886', 'Color space AgX Base Rec.1886'), ('AgX Base Rec.2020', 'AgX Base Rec.2020', 'Color space AgX Base Rec.2020'), ('AgX Base sRGB', 'AgX Base sRGB', 'Color space AgX Base sRGB'), ('AgX Log', 'AgX Log', 'Color space AgX Log'), ('Display P3', 'Display P3', 'Color space Display P3'), ('Filmic Log', 'Filmic Log', 'Color space Filmic Log'), ('Filmic sRGB', 'Filmic sRGB', 'Color space Filmic sRGB'), (

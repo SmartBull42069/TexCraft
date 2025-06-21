@@ -30,6 +30,10 @@ def ApplyCurrentBakingPreset(self, context):
                 new_item.space = tempObj[property]["space"]
                 new_item.float = tempObj[property]["float"]
                 new_item.DName = tempObj[property]["DName"]
+                new_item.Red=tempObj[property]["Red"]
+                new_item.Green=tempObj[property]["Green"]
+                new_item.Blue=tempObj[property]["Blue"]
+                new_item.Invert=tempObj[property]["Invert"]
                 new_item.shaderNode = tempObj[property]["shaderNode"]
                 context.scene.bakingList_index = len(
                     context.scene.bakingList)-1
@@ -72,6 +76,16 @@ class BAKE_PT_PANEL(bpy.types.Panel):
                 itemList[indexList], "space", text="color space")
             channelRow.prop(
                 itemList[indexList], "float", text="32 bit texture", toggle=True)
+            if(itemList[indexList].name in scene.greyScale):
+                channelRow.prop(
+                itemList[indexList], "Invert", text="Invert", toggle=True)
+            else:
+                channelRow.prop(
+                itemList[indexList], "Red", text="Invert Red", toggle=True)
+                channelRow.prop(
+                itemList[indexList], "Green", text="Invert Green", toggle=True)
+                channelRow.prop(
+                itemList[indexList], "Blue", text="Invert Blue", toggle=True)
 
 
 class BAKE_OT_Save(bpy.types.Operator):
@@ -86,7 +100,7 @@ class BAKE_OT_Save(bpy.types.Operator):
         tempDictionary = {}
         for bake in scene.bakingList:
             tempDictionary[bake.name] = {
-                "Naming": bake.naming, "enabled": bake.enabled, "space": bake.space, "float": bake.float, "shaderNode": bake.shaderNode,"DName": bake.DName}
+                "Naming": bake.naming, "enabled": bake.enabled, "space": bake.space, "float": bake.float, "shaderNode": bake.shaderNode,"DName": bake.DName,"Red":bake.Red,"Green":bake.Green,"Blue":bake.Blue,"Invert":bake.Invert}
         os.makedirs("folder", exist_ok=True)
         with open(f"./{folder}/{scene.BakePresetName}.json", "w") as jsonFile:
             json.dump(tempDictionary, jsonFile)
@@ -137,7 +151,10 @@ class BakeObject(bpy.types.PropertyGroup):
         name="Shader Node", default="BSDF_PRINCIPLED", description="Shader node type")
     DName: bpy.props.StringProperty(
         name="Display name", default="BSDF_PRINCIPLED", description="Display name of bake type")
-
+    Red:bpy.props.BoolProperty(name="Invert Red",default=False,description="Invert red channel")
+    Green:bpy.props.BoolProperty(name="Invert Green",default=False,description="Invert red channel")
+    Blue:bpy.props.BoolProperty(name="Invert Blue",default=False,description="Invert red channel")
+    Invert:bpy.props.BoolProperty(name="Invert",default=False,description="Invert the texture")
 listOfClassSecond = [BAKE_OT_Save, BAKE_PT_PANEL,
                      BAKING_UL_List, CREATE_OT_BAKE]
 class_register_second, class_unregister_second = bpy.utils.register_classes_factory(

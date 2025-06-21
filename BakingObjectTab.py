@@ -13,13 +13,18 @@ def GetUv(self,context):
         for uv in self.mesh.data.uv_layers:
             uvList.append((uv.name, uv.name, uv.name))
     return uvList
-
+def checkIfMeshSelected(self,context):
+    if((self.selected!=None) and ((self.selected.type!="MESH") or (self.selected==self.mesh))):
+        self.selected=None
+def checkIfMeshCage(self,context):
+    if((self.cage!=None) and ((self.cage.type!="MESH") or (self.cage==self.mesh))):
+        self.cage=None
 class MyItem(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="Item Name", default="New Item")
     icon: bpy.props.StringProperty(name="Icon", default="OBJECT_DATAMODE")
     mesh: bpy.props.PointerProperty(type=bpy.types.Object)
-    cage: bpy.props.PointerProperty(type=bpy.types.Object)
-    selected: bpy.props.PointerProperty(type=bpy.types.Object)
+    cage: bpy.props.PointerProperty(type=bpy.types.Object,update=checkIfMeshCage)
+    selected: bpy.props.PointerProperty(type=bpy.types.Object,update=checkIfMeshSelected)
     useActiveToSelected: bpy.props.BoolProperty(
         name="Selected To active", default=False, update=ChangeToNone)
     useCage: bpy.props.BoolProperty(
@@ -112,10 +117,16 @@ def ObjectExist(scene):
             if (scene.my_items[index].mesh.name not in scene.objects):
                 scene.my_items_index=index
                 bpy.ops.my_list.remove_item()
-            if (scene.my_items[index].useActiveToSelected and scene.my_items[index].selected.name not in scene.objects):
-                scene.my_items[index].selected=None
-            if (scene.my_items[index].useCage and scene.my_items[index].cage.name not in scene.objects):
-                scene.my_items[index].cage=None
+            try:
+                if (scene.my_items[index].useActiveToSelected and scene.my_items[index].selected.name not in scene.objects):
+                    scene.my_items[index].selected=None
+            except:
+                pass
+            try:
+                if (scene.my_items[index].useCage and scene.my_items[index].cage.name not in scene.objects):
+                    scene.my_items[index].cage=None
+            except:
+                pass
     
 def Register():
     class_register()

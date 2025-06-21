@@ -12,7 +12,7 @@ import cv2
 import imageio
 
 
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+
 
 
 def GetNeedColorRamp(mats: Material, bakeType, outPutSocket: NodeSocket):
@@ -172,7 +172,7 @@ def CreateUv(useUv: bool) -> List[MeshUVLoopLayer]:
 
     for obj in bpy.context.scene.my_items:
         mesh: Object = obj.mesh
-        if (not useUv[mesh]):
+        if (not useUv[mesh] or len(mesh.data.uv_layers)>=8):
             meshListWithUv[mesh]= mesh.data.uv_layers[obj.uv]
         else:
             New_Uv_map: MeshUVLoopLayer = mesh.data.uv_layers.new(
@@ -219,14 +219,20 @@ def removeAndSetUv(mesh: Object, uvMap: MeshUVLoopLayer) -> None:
 
 
 def CopySetMaterial(mesh: Object, index: int) -> Material:
-    name = bpy.context.scene.CopiedMaterialName
+    
     mat: Material = mesh.material_slots[index].material.copy()
     mesh.material_slots[index].material = mat
+    mat.name = GetMaterialName(mesh, mat)
+    return mat
+
+def GetMaterialName(mesh, mat):
+    name = bpy.context.scene.CopiedMaterialName
     if (name != ""):
         name = name.replace("[mat]", mat.name)
         name = name.replace("[Object]", mesh.name)
-        mat.name = name
-    return mat
+        return name
+    else:
+        return mat.name
 
 
 def addImageNode(mats: Material, uvMap: MeshUVLoopLayer, mesh: Object, useUdims: bool, udimCount: int, actMat, imageObj, exisitingImage=None) -> Image:
@@ -252,8 +258,13 @@ def addImageNode(mats: Material, uvMap: MeshUVLoopLayer, mesh: Object, useUdims:
 
 def GetNewImage(mats, useUdims, udimCount, mesh, imageObj):
     fileName = GetImageName(mats, mesh, imageObj)
+    if(bpy.context.scene.FileFormat=="jpg"):
+        useAlpha=False
+    else:
+        useAlpha=True
     NewImg: Image = bpy.data.images.new(
-        fileName, round(bpy.context.scene.height*bpy.context.scene.AntialiasingScale), round(bpy.context.scene.width*bpy.context.scene.AntialiasingScale), float_buffer=imageObj.float, alpha=True, tiled=useUdims)
+        fileName, round(bpy.context.scene.height*bpy.context.scene.AntialiasingScale), round(bpy.context.scene.width*bpy.context.scene.AntialiasingScale), float_buffer=imageObj.float, alpha=useAlpha, tiled=useUdims)
+    
     NewImg.colorspace_settings.name = imageObj.space
     if (useUdims and len(udimCount) > 0):
         NewImg.source = "TILED"
@@ -271,12 +282,38 @@ def GetNewImage(mats, useUdims, udimCount, mesh, imageObj):
 def AddRestOfImageNode(bakesImage: ShaderNodeTexImage, mats: Material):
     imageTexture: ShaderNodeTexImage = mats.node_tree.nodes.new(
         type="ShaderNodeTexImage")
-    imageTexture.image = bakesImage.image
+    imageTexture.image=bakesImage
     for node in mats.node_tree.nodes:
         node.select = False
     imageTexture.select = True
     mats.node_tree.nodes.active = imageTexture
+    return imageTexture
 
+def getUnpackedMateria(mats:Material,num,obj:Object,revertMaterials):
+    home_area = bpy.context.area.type
+    home_ui = bpy.context.area.ui_type
+    copiedMat=mats.copy()
+    obj.material_slots[num].material = copiedMat
+    spaces = [copiedMat]
+    numberOfSpaces=0
+    copiedMat.name=f"unpackedMat {mats.name} {obj.name} "
+    for space in spaces:
+        for node in space.node_tree.nodes:
+            if node.type == 'GROUP':
+                spaces.append(node)
+                numberOfSpaces+=1
+    bpy.context.area.type = "NODE_EDITOR"
+    bpy.context.area.ui_type = "ShaderNodeTree"
+    bpy.context.space_data.shader_type = "OBJECT"
+    for i in range(numberOfSpaces):
+        bpy.ops.node.select_all(action='SELECT')
+        bpy.ops.node.group_ungroup()
+        bpy.context.view_layer.update()
+    bpy.context.area.type = home_area
+    bpy.context.area.ui_type = home_ui
+    if(revertMaterials):
+        obj.material_slots[num].material = mats
+    return copiedMat
 
 def BreakLink(ConnectionNode: Node, mats: Material, mapType: str):
 
@@ -342,7 +379,7 @@ def CreatLink(mats: Material, InputValueNode: Node, OutPutValueNode: NodeSocket,
             k=OutPutValueNode.links[0].from_node
 
 
-def GetInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
+def GetInputNode(mats: Material, NodeType: str, bakeType) -> Node:
     nodeGroupsList: List[Node] = []
     nodeList: List[Node] = []
     nodeList.extend(mats.node_tree.nodes)
@@ -353,18 +390,16 @@ def GetInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
             if (getattr(node, propertyDependInfo["Property"]) not in propertyDependInfo["PropertyAccept"]):
                 # here maybe
                 continue
-        if (node.type == NodeType):
+        if (node.type in NodeType):
             if(bakeType in  bpy.context.scene.requireAdditionalNode):
 
                 connectToOutNode = GetNodeSocketFromRequire(
                         mats, bpy.context.scene.requireAdditionalNode[bakeType])
-                deleteNode[mats]=connectToOutNode[1]
                 # nodesToDelete[bakeMat].append(connectToOutNode.node)
                 newSocket = GetNeedColorRamp(
                         mats, bakeType, connectToOutNode[0])
                 if (newSocket != False):
                         connectToOutNode = newSocket[0]
-                        deleteNode[mats]=newSocket[1]
                         # nodesToDelete[bakeMat].append(newSocket.node)
                 else:
                     connectToOutNode = connectToOutNode[0]
@@ -376,30 +411,57 @@ def GetInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
         elif (type(node) == bpy.types.ShaderNodeGroup):
             nodeGroupsList.append(node)
     for nodeGroup in nodeGroupsList:
-        result = GetInputNode(nodeGroup, NodeType, bakeType,deleteNode)
+        result = GetInputNode(nodeGroup, NodeType, bakeType)
         if (result != False):
             return result
     return False
-
-
-def GetAllInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
+def GetAllNodeMat(mats: Material, NodeType,bakeType):
     nodeGroupsList: List[Node] = []
     nodeList: List[Node] = []
     nodeList.extend(mats.node_tree.nodes)
     foundNodes = []
 
     for node in nodeList:
-        if (node.type == NodeType):
-            if (node.type == "BUMP" and (node.inputs["Normal"].is_linked)):
+        if (node.type in NodeType):
+            if (node.type == "BUMP" and (node.outputs[0].links[0].to_node.type=="BUMP")):
+                # here maybe
+                continue
+            propertyDependentInput = bpy.context.scene.propertyDependentInput
+            if (bakeType in propertyDependentInput and propertyDependentInput[bakeType]["NodeType"] == node.type):
+                propertyDependInfo = propertyDependentInput[bakeType]
+                if (getattr(node, propertyDependInfo["Property"]) not in propertyDependInfo["PropertyAccept"]):
+                    # here maybe
+                    continue
+            foundNodes.append(
+            [node, mats])
+        elif (type(node) == bpy.types.ShaderNodeGroup):
+            nodeGroupsList.append(node)
+    for nodeGroup in nodeGroupsList:
+        result = GetAllNodeMat(nodeGroup, NodeType, bakeType)
+        if (result != False):
+            foundNodes.extend(result)
+    multipleNodeInfo = bpy.context.scene.multipleNode
+    if (foundNodes.__len__() <= 0):
+        # here maybe
+        return False
+    else:
+        return foundNodes
+def GetAllInputNode(mats: Material, NodeType: str, bakeType) -> Node:
+    nodeGroupsList: List[Node] = []
+    nodeList: List[Node] = []
+    nodeList.extend(mats.node_tree.nodes)
+    foundNodes = []
+
+    for node in nodeList:
+        if (node.type in NodeType):
+            if (node.type == "BUMP" and (node.outputs[0].links[0].to_node.type=="BUMP")):
                 # here maybe
                 continue
             
             propertyDependentInput = bpy.context.scene.propertyDependentInput
-            if (bakeType in propertyDependentInput and propertyDependentInput[bakeType]["NodeType"] == NodeType):
+            if (bakeType in propertyDependentInput and propertyDependentInput[bakeType]["NodeType"] == node.type):
                 propertyDependInfo = propertyDependentInput[bakeType]
                 if (getattr(node, propertyDependInfo["Property"]) not in propertyDependInfo["PropertyAccept"]):
-                    print(getattr(node, propertyDependInfo["Property"]))
-                    print(propertyDependInfo["PropertyAccept"])
                     # here maybe
                     continue
             if(bakeType in  bpy.context.scene.requireAdditionalNode):
@@ -414,12 +476,10 @@ def GetAllInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
                 if(not added):
                     connectToOutNode = GetNodeSocketFromRequire(
                             mats, bpy.context.scene.requireAdditionalNode[bakeType])
-                    deleteNode[mats]=connectToOutNode[1]
                     newSocket = GetNeedColorRamp(
                             mats, bakeType, connectToOutNode[0])
                     if (newSocket != False):
                             connectToOutNode = newSocket[0]
-                            deleteNode[mats]=newSocket[1]
                     else:
                         connectToOutNode = connectToOutNode[0]
                     foundNodes.append(
@@ -431,19 +491,28 @@ def GetAllInputNode(mats: Material, NodeType: str, bakeType,deleteNode) -> Node:
         elif (type(node) == bpy.types.ShaderNodeGroup):
             nodeGroupsList.append(node)
     for nodeGroup in nodeGroupsList:
-        result = GetAllInputNode(nodeGroup, NodeType, bakeType,deleteNode)
-        if (type(result) != List):
+        result = GetAllInputNode(nodeGroup, NodeType, bakeType)
+        if (result != False):
             foundNodes.extend(result)
-    multipleNodeInfo = bpy.context.scene.multipleNode
     if (foundNodes.__len__() <= 0):
         # here maybe
-        return [False, f"No {NodeType} node found in {mats.name}"]
-    elif ((foundNodes.__len__() > 1) and (multipleNodeInfo[NodeType][0] == True)):
-        return foundNodes
-    elif ((foundNodes.__len__() > 1) and (multipleNodeInfo[NodeType][0] == False)):
-        return [False, f"Multiple {NodeType} node found in {mats.name}"]
+        return False
     else:
         return foundNodes
+def GetAllNode(mats: Material, NodeType,excluded=""):
+    nodeList: List[Node] = []
+    nodeList.extend(mats.node_tree.nodes)
+    foundNodes = {}
+    for node in nodeList:
+        if (node.type in NodeType and node.type not in excluded and node.outputs[0].is_linked):
+            foundNodes[node]=mats
+    if (foundNodes.__len__() <= 0):
+        # here maybe
+        return False
+    elif (foundNodes.__len__() > 1):
+        return foundNodes
+
+
 
 
 
@@ -452,8 +521,11 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
     ImageBakeData = {}
     selectedToActiveDate = {}
     defaultData = {}
-    nodesToDelete = {}
+    matsTodelete=[]
     allReadyHasImage = {}
+    ogMats={}
+    imageMat={}
+    selectedImageMat={}
     allReadyHasSlectedImage = {}
     inputNodeType = bpy.context.scene.inputNode
     inputNodeName = bpy.context.scene.inputNodeNames
@@ -472,118 +544,96 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
     matLen = mesh.data.materials.__len__()
     for matSlot in range(matLen):
         mats = mesh.data.materials[matSlot]
-        materialOutput = GetInputNode(mats, "OUTPUT_MATERIAL", "Material OutPut Surface",nodesToDelete)
-        ImageBakeData[mats] = []
-        selectedToActiveDate[mats] = []
-        defaultData[mats] = []
+        unpackedMat=getUnpackedMateria(mats,matSlot,mesh,False)
+        matsTodelete.append(unpackedMat)
+        ogMats[mats]=[matSlot,mesh]
+        
+        materialOutput = GetInputNode(mats, "OUTPUT_MATERIAL", "Material OutPut Surface")
+        ImageBakeData[mats] = None
+        selectedToActiveDate[unpackedMat]=[]
+        defaultData[mats] = None
         if (selected != None):
-            exclusionMat = selected.data.materials[matSlot]
+            exclusionMat = getUnpackedMateria(selected.data.materials[matSlot],matSlot,mesh,False)
+            if(bakeType not in bpy.context.scene.DontMax):
+                MaxOutOut(bakeType, exclusionMat)
             exclusionMaterialOutput = GetInputNode(
-                exclusionMat, "OUTPUT_MATERIAL", "Material OutPut Surface",nodesToDelete)
+                exclusionMat, "OUTPUT_MATERIAL", "Material OutPut Surface")
         else:
             exclusionMat = mats
             exclusionMaterialOutput = materialOutput
-        if (mats != None):
-            BakeInputNodes = GetAllInputNode(
-                mats, inputNodeType[bakeType], bakeType,nodesToDelete)
-            if (BakeInputNodes[0] == False):
-                continue  # here
+        if(bakeType not in bpy.context.scene.DontMax):
+            MaxOutOut(bakeType, unpackedMat) 
+        
 
+        if (mats != None):
+            BakeInputNodesUnpacked = GetAllInputNode(
+                unpackedMat, inputNodeType[bakeType], bakeType)
+            if (BakeInputNodesUnpacked == False):
+                continue  # here
             if (materialOutput == False):
                 continue   # here
-            if (len(BakeInputNodes) > 1):
+            if (len(BakeInputNodesUnpacked) > 1):
                 shoulBake = True
-            for bakeInputNode in BakeInputNodes:
+            if (firstBakedImage == None):
+                if matSlot in existingImages[bakeType]:
+                    existingImage = existingImages[bakeType][matSlot]
+                else:
+                    existingImage = None
+                firstBakedImage = addImageNode(unpackedMat, uv, mesh, useUdims, udimCount, mats, imageObj, existingImage)
+                ImageBakeData[mats]=[firstBakedImage, mesh,unpackedMat]
+            elif(bpy.context.scene.BakeMulitpleSlots):
+                newImageNode=AddRestOfImageNode(firstBakedImage.image,
+                                            unpackedMat)
+                ImageBakeData[mats]=[newImageNode, mesh,unpackedMat]
+            else:
+                if matSlot in existingImages[bakeType]:
+                    existingImage = existingImages[bakeType][matSlot]
+                else:
+                    existingImage = None
+                newBakeImage = addImageNode(unpackedMat, uv, mesh, useUdims, udimCount, mats, imageObj, existingImage,False)
+                ImageBakeData[mats]=[newBakeImage, mesh,unpackedMat]
 
-                bakeNodeToAdd = bakeInputNode[0]
-                bakeMatToAdd = bakeInputNode[1]
-                nodesToDelete[bakeMatToAdd] = []
-
-                if (firstBakedImage == None):
-                    if (bakeMatToAdd in allReadyHasImage):
-                        ImageBakeData[mats].append(
-                            [allReadyHasImage[bakeMatToAdd], bakeMatToAdd, bakeNodeToAdd, mesh])
-                    else:
-                        if matSlot in existingImages[bakeType]:
-                            existingImage = existingImages[bakeType][matSlot]
-                        else:
-                            existingImage = None
-                        firstBakedImage = addImageNode(
-                            bakeMatToAdd, uv, mesh, useUdims, udimCount, mats, imageObj, existingImage)
-                        allReadyHasImage[bakeMatToAdd] = firstBakedImage
-                        ImageBakeData[mats].append([firstBakedImage,
-                                                    bakeMatToAdd, bakeNodeToAdd, mesh])
-
-                    if (selected and bpy.context.scene.BakeMultiple and len(bpy.context.scene.my_items) > 1):
-                        if (bakeMatToAdd in allReadyHasSlectedImage):
-                            selectedToActiveDate[mats].append([allReadyHasSlectedImage[bakeMatToAdd],
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
+            
+            for BakeInputNodeUnpacked in BakeInputNodesUnpacked:
+                bakeNodeToAddUnpacked = BakeInputNodeUnpacked[0]
+                if (selected and bpy.context.scene.BakeMultiple and len(bpy.context.scene.my_items) > 1):
+                    if(firstBakedImageSelected==None):
+                        if (unpackedMat in allReadyHasSlectedImage):
+                            selectedToActiveDate[unpackedMat].append([allReadyHasSlectedImage[unpackedMat],
+                                                               unpackedMat, bakeNodeToAddUnpacked, mesh])
                         else:
                             firstBakedImageSelected = addImageNode(
-                                bakeMatToAdd, uv, mesh, useUdims, udimCount, mats, imageObj)
-                            selectedToActiveDate[mats].append([firstBakedImageSelected,
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
-                            allReadyHasSlectedImage[bakeMatToAdd] = firstBakedImageSelected
-                            nodesToDelete[bakeMatToAdd].append(
-                                firstBakedImageSelected)
-
-                elif (bpy.context.scene.BakeMulitpleSlots):
-                    if (bakeMatToAdd in allReadyHasImage):
-                        ImageBakeData[mats].append([allReadyHasImage[bakeMatToAdd],
-                                                    bakeMatToAdd, bakeNodeToAdd, mesh])
-                    else:
-                        AddRestOfImageNode(firstBakedImage,
-                                           bakeMatToAdd)
-                        ImageBakeData[mats].append([firstBakedImage,
-                                                    bakeMatToAdd, bakeNodeToAdd, mesh])
-                        allReadyHasImage[bakeMatToAdd] = firstBakedImage
-
-                    if (firstBakedImageSelected and bpy.context.scene.BakeMultiple and len(bpy.context.scene.my_items) > 1):
-                        if (bakeMatToAdd in allReadyHasSlectedImage):
-                            selectedToActiveDate[mats].append([allReadyHasSlectedImage[bakeMatToAdd],
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
+                                unpackedMat, uv, mesh, useUdims, udimCount, unpackedMat, imageObj)
+                            selectedToActiveDate[unpackedMat].append([firstBakedImageSelected,
+                                                            unpackedMat, bakeNodeToAddUnpacked, mesh])
+                            allReadyHasSlectedImage[unpackedMat] = firstBakedImageSelected
+                            selectedImageMat[unpackedMat]=firstBakedImageSelected
+                    elif(bpy.context.scene.BakeMulitpleSlots):
+                        if (unpackedMat in allReadyHasSlectedImage):
+                            selectedToActiveDate[unpackedMat].append([allReadyHasSlectedImage[unpackedMat],
+                                                               unpackedMat, bakeNodeToAddUnpacked, mesh])
                         else:
-                            AddRestOfImageNode(firstBakedImageSelected,
-                                               bakeMatToAdd)
-                            selectedToActiveDate[mats].append([firstBakedImageSelected,
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
-                            allReadyHasSlectedImage[bakeMatToAdd] = firstBakedImageSelected
-                            nodesToDelete[bakeMatToAdd].append(
-                                firstBakedImageSelected)
-
-                else:
-                    if (bakeMatToAdd in allReadyHasImage):
-                        ImageBakeData[mats].append([allReadyHasImage[bakeMatToAdd],
-                                                    bakeMatToAdd, bakeNodeToAdd, mesh])
+                            newImageNodeSelected=AddRestOfImageNode(firstBakedImageSelected.image,
+                                            unpackedMat)
+                            selectedToActiveDate[unpackedMat].append([newImageNodeSelected,
+                                                            unpackedMat, bakeNodeToAddUnpacked, mesh])
+                            allReadyHasSlectedImage[unpackedMat] = firstBakedImageSelected
+                            selectedImageMat[unpackedMat]=newImageNodeSelected
                     else:
-                        if matSlot in existingImages[bakeType]:
-                            existingImage = existingImages[bakeType][matSlot]
-                        else:
-                            existingImage = None
-                        newBakedImage = addImageNode(
-                            bakeMatToAdd, uv, mesh, useUdims, udimCount, mats, imageObj, existingImage)
-                        allReadyHasImage[bakeMatToAdd] = newBakedImage
-                        ImageBakeData[mats].append([newBakedImage,
-                                                    bakeMatToAdd, bakeNodeToAdd, mesh])
-
-                    if (selected and bpy.context.scene.BakeMultiple and len(bpy.context.scene.my_items) > 1):
-                        if (bakeMatToAdd in allReadyHasSlectedImage):
-                            selectedToActiveDate[mats].append([allReadyHasSlectedImage[bakeMatToAdd],
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
+                        if (unpackedMat in allReadyHasSlectedImage):
+                            selectedToActiveDate[unpackedMat].append([allReadyHasSlectedImage[unpackedMat],
+                                                               unpackedMat, bakeNodeToAddUnpacked, mesh])
                         else:
                             newBakedImageSelected = addImageNode(
-                                bakeMatToAdd, uv, mesh, useUdims, udimCount, mats, imageObj)
-                            allReadyHasSlectedImage[bakeMatToAdd] = newBakedImageSelected
-                            selectedToActiveDate[mats].append([newBakedImageSelected,
-                                                               bakeMatToAdd, bakeNodeToAdd, mesh])
-
-                            nodesToDelete[bakeMatToAdd].append(
-                                newBakedImageSelected)
-
+                                unpackedMat, uv, mesh, useUdims, udimCount, unpackedMat, imageObj)
+                            allReadyHasSlectedImage[unpackedMat] = newBakedImageSelected
+                            selectedToActiveDate[unpackedMat].append([newBakedImageSelected,
+                                                            unpackedMat, bakeNodeToAddUnpacked, mesh])
+                            selectedImageMat[unpackedMat]=newBakedImageSelected
                 if (shoulBake == False):
-
+                    
                     currentState = PreBakeTypeCheck(
-                        bakeNodeToAdd.inputs[inputNodeName[bakeType]])
+                        bakeNodeToAddUnpacked.inputs[inputNodeName[bakeType]])
                     if (currentState[0] == 0):
                         continue
                     if (currentState[0] == 1):
@@ -598,23 +648,18 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                                 shoulBake = False
                             else:
                                 shoulBake = True
-
                         if (shoulBake == False):
-                            defaultData[mats].append([previouseState[1],
-                                                      bakeMatToAdd, bakeNodeToAdd, mesh])
+                            defaultData[mats]=[previouseState[1],mesh,unpackedMat]
+                                
         if (not shoulBake and not imageObj.enabled):
             return None
         if (selected != None):
             BakeInputNodesToUse = GetAllInputNode(
-                exclusionMat, inputNodeType[bakeType], bakeType,nodesToDelete)
+                exclusionMat, inputNodeType[bakeType], bakeType)
         else:
-            BakeInputNodesToUse = BakeInputNodes
+            BakeInputNodesToUse = BakeInputNodesUnpacked
         for BakeInputNode in BakeInputNodesToUse:
             bakeMat: Material = BakeInputNode[1]
-            if (bakeMat not in nodesToDelete):
-                nodesToDelete[bakeMat] = []
-
-            
             if (bakeType in bpy.context.scene.requiresConnection or bakeType in bpy.context.scene.requiresDefaultValue):
                 
                 value = BakeInputNode[2]
@@ -624,6 +669,7 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                     nodeTocheck= BakeInputNode[0].outputs[baseBakeInfo[BakeInputNode[0].type]["Output"]].links[0].to_node
                 emissionNode: Node = bakeMat.node_tree.nodes.new(
                     type="ShaderNodeBsdfPrincipled")
+                emissionNode.inputs["Emission Strength"].default_value = 1.0
                 defaultValue = None
                 connecton = None
                 if (bakeType in bpy.context.scene.requiresConnection):
@@ -635,23 +681,21 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                 
 
                 inputSocket: NodeSocket = nodeTocheck.outputs[0].links[0].to_socket
-                
-                fromSocket: NodeSocket = nodeTocheck.outputs[0]
                 excludedNode: Node = nodeTocheck.outputs[0].links[0].to_node
                 if (bakeType in bpy.context.scene.ConvertInput):
                     inputSocket=excludedNode.inputs[bpy.context.scene.ConvertInput[bakeType]]
-                    fromSocket=inputSocket.links[0].from_socket
-                nodesToDelete[bakeMat].append(emissionNode)
+                fromSocket=inputSocket.links[0].from_socket
                 if (defaultValue):
                     CreatLink(bakeMat, emissionNode, defaultValue, "Strength")
                 if (connecton):
                     CreatLink(bakeMat, emissionNode, value, connecton)
-                if(inputSocket.name not in excludedChannels):
-                    excludedChannels[inputSocket.name] = []
-                excludedChannels[inputSocket.name].append(
-                    [excludedNode, fromSocket, bakeMat, inputSocket])
                 CreatLink(bakeMat, inputSocket.node, emissionNode.outputs[0], inputSocket)
-                
+                if(excludedNode.type=="MIX_SHADER"):
+                    if(excludedNode.inputs[1]==inputSocket):
+                        if(not excludedNode.inputs[2].is_linked):
+                            CreatLink(bakeMat,excludedNode,0,0)
+                    elif (not excludedNode.inputs[1].is_linked):
+                        CreatLink(bakeMat,excludedNode,1,0)  
 
             else:
                 for excludedChannel in excludedChannels:
@@ -672,13 +716,9 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
                         if ((excludedInputNode[0].type != dependentPropertyInfo["NodeType"]) or (getattr(excludedInputNode[0], dependentPropertyInfo["Property"]) not in dependentPropertyInfo["PropertyAccept"])):
                             excludedInputNode = False
                     if (excludedInputNode != False):
-                        print(excludedChannel)
                         inputName = inputNodeName[excludedChannel]
                         valueExcludedChannel = BreakLink(
                             excludedInputNode[0], excludedInputNode[1], inputName)
-                        if (valueExcludedChannel != None):
-                            excludedChannels[excludedChannel].append([
-                                excludedInputNode[0], valueExcludedChannel, excludedInputNode[1], inputName])
     if (selected != None):
         selected.select_set(True)
     mesh.select_set(True)
@@ -687,14 +727,43 @@ def bakeMap(uv: MeshUVLoopLayer, mesh: Object, bakeType: str, useUdims: bool, ud
     if (bpy.context.scene.ShadeSmooth):
         bpy.ops.object.shade_smooth()
     if (shoulBake):
-        return [True, ImageBakeData, excludedChannels, nodesToDelete, selectedToActiveDate]
-    for mats in ImageBakeData:
-        nodeMat: Material = ImageBakeData[mats]
-        for items in nodeMat:
-            node: ShaderNodeTexImage = items[0]
-            nodesToDelete[items[1]].append(node)
+        return [True, ImageBakeData, selectedToActiveDate,ogMats,matsTodelete]
+    return [False, defaultData, selectedToActiveDate,ogMats,matsTodelete]
 
-    return [False, defaultData, excludedChannels, nodesToDelete]
+def MaxOutOut(bakeType, unpackedMat):
+    toDisconnectShaders=GetAllNode(unpackedMat,bpy.context.scene.shaderNodes,bpy.context.scene.inputNode[bakeType])
+    combinationShaders=GetAllNode(unpackedMat,bpy.context.scene.CombinationShader)
+    if(toDisconnectShaders):
+        tempDictionary={}
+        while len(toDisconnectShaders)>=1:
+            for shaderNodes in toDisconnectShaders:
+                connection:NodeSocket=shaderNodes.outputs[0].links[0].to_socket
+                fromNode:Node=connection.node
+                if(fromNode.type=="MIX_SHADER"):
+                    socketInt=2
+                    otherSocket=1
+                else:
+                    socketInt=0
+                    otherSocket=1
+                if(fromNode.inputs[1]==connection):
+                    temp=socketInt
+                    socketInt=otherSocket
+                    otherSocket=temp
+                value=BreakLink(fromNode,unpackedMat,socketInt)
+                if(not fromNode.inputs[otherSocket].is_linked and fromNode not in toDisconnectShaders and fromNode.type!="OUTPUT_MATERIAL"):
+                    tempDictionary[fromNode]=unpackedMat
+            toDisconnectShaders=tempDictionary.copy()
+            tempDictionary.clear()
+    if(combinationShaders):
+        for combinationShader in combinationShaders:
+            if(combinationShader.type=="MIX_SHADER"):
+                combinationShader:Node=combinationShader
+                if(combinationShader.inputs[1].is_linked):
+                    if(not combinationShader.inputs[2].is_linked):
+                        CreatLink(combinationShaders[combinationShader],combinationShader,0,0)
+                elif(combinationShader.inputs[2].is_linked):
+                    if(not combinationShader.inputs[1].is_linked):
+                       CreatLink(combinationShaders[combinationShader],combinationShader,1,0)
 
 def GetInputValueRaw(BakeType: str, BakeInputNode: Node):
     NodeSocketValue: NodeSocket = BakeInputNode.inputs[bpy.context.scene.inputNodeNames[
@@ -733,31 +802,14 @@ def GetInputValue(BakeType: str, BakeInputNode: Node):
     return Value
 
 
-def RestoreData(BakeType, excludedChannels, nodesToDelete):
-    createdOne = {}
-    for nodeMat in nodesToDelete:
-        for node in nodesToDelete[nodeMat]:
-            try:
-                if (type(node) == ShaderNodeTexImage):
-                    if (node.image):
-                        bpy.data.images.remove(node.image)
-                nodeMat.node_tree.nodes.remove(node)
-            except Exception as e:
-                print(e)
-    for excludedChannel in excludedChannels:
-        for excludedPairs in excludedChannels[excludedChannel]:
-            if ((excludedChannel != BakeType) or (BakeType in bpy.context.scene.requiresConnection) or (BakeType in bpy.context.scene.requiresDefaultValue)):
-                if (type(excludedPairs[0]) == str):
-                    if (not any(True for mat in createdOne if (excludedPairs[2] == mat) and (excludedPairs[0] == createdOne[mat].bl_idname))):
-                        excludedPairs[0] = excludedPairs[2].node_tree.nodes.new(
-                            type=excludedPairs[0])
-                        createdOne[excludedPairs[2]] = excludedPairs[0]
-                    else:
-                        excludedPairs[0] = createdOne[excludedPairs[2]]
-                CreatLink(excludedPairs[2],
-                          excludedPairs[0], excludedPairs[1], excludedPairs[3])
-
-
+def RestoreData(ogMats,matsTodelete,imagesToRemove):
+    for images in imagesToRemove:
+        bpy.data.images.remove(images)
+    for matToDelete in matsTodelete:
+        bpy.data.materials.remove(matToDelete)
+    for mat in ogMats:
+        ogMats[mat][1].material_slots[ogMats[mat][0]].material=mat
+    
 def copyNodeGroup(Mats: Material):
     nodeGroup = []
     for node in Mats.node_tree.nodes:
@@ -781,16 +833,15 @@ def bakeNow():
     bakeObjectList = {}
     allMeshName = ""
     allMatName = ""
-
     uvFullCheck = CombineUvCheck(uvPointRound)
     useUv = uvFullCheck[2]
     useUdims = uvFullCheck[0]
     uvTiles = uvFullCheck[1]
     uvList = CreateUv(useUv)
-
+    multiplebake={}
     for obj in bpy.context.scene.my_items:
         for bakeObj in bpy.context.scene.bakingList:
-            if ((bakeObj.enabled) or (bpy.context.scene.BakeMulitpleSlots and ((bakeObj.name not in bpy.context.scene.miscBake) and (bakeObj.name not in bpy.context.scene.notRequireBakingWhenBakingAll)) and ((bpy.context.scene.ApplyMaterial or bpy.context.scene.ApplyToCopiedAndHideOriginal)))):
+            if ((bakeObj.enabled) or (bpy.context.scene.BakeMulitpleSlots and ((bakeObj.name not in bpy.context.scene.allwaysRequireBaking)) and ((bpy.context.scene.ApplyMaterial or bpy.context.scene.ApplyToCopiedAndHideOriginal)))):
                 if (bakeObj not in bakeObjectList):
                     bakeObjectList[bakeObj] = []
                 bakeObjectList[bakeObj].append(obj)
@@ -811,6 +862,7 @@ def bakeNow():
         dataToRemoveRestore = []
         multiResModifiers = {}
         for MeshObj in bakeObjectList[bakeObj]:
+            createdImages=[]
             mesh = MeshObj.mesh
             if (bakeType not in existingImages):
                 existingImages[bakeType] = {}
@@ -838,7 +890,6 @@ def bakeNow():
             else:
                 tilesToUse = uvTiles[mesh]
                 needUdims = useUdims[mesh]
-            SelectedUv = uvList[mesh]
             if (len(existingImages[bakeType]) == 0):
                 for i in range(maxMultipleBakeImageSlot):
                     existingImages[bakeType][i] = GetNewImage(
@@ -846,25 +897,34 @@ def bakeNow():
             SelectedUv = uvList[mesh]
             BakedMap = bakeMap(SelectedUv, mesh, bakeType,
                                needUdims, tilesToUse, bakeObj, selectedObject, existingImages)
-
             if (type(BakedMap) == str or BakedMap == None):
                 continue  # here too
             for mats in BakedMap[1]:
+                items=BakedMap[1][mats]
+                if(items==None):
+                    continue
                 if (mats not in createdMaterial):
                     createdMaterial[mats] = {}
                 if (bakeType not in createdMaterial[mats]):
-                    createdMaterial[mats][bakeType] = []
-                for items in BakedMap[1][mats]:
-                    createdMaterial[mats][bakeType].append([
-                        items[0], items[1], items[2], mesh, bakeObj])
+                    createdMaterial[mats][bakeType] = None
+                
+                if(type(items[0])==ShaderNodeTexImage):
+                    createdMaterial[mats][bakeType]=[
+                        items[0].image, items[1],bakeObj,"FULL"]
+                    multiplebake[items[2]]=items[0]
+                    createdImages.append(items[0].image)
+                else:
+                    createdMaterial[mats][bakeType]=[
+                        items[0], items[1],bakeObj,"FULL"]
+            
             if (selectedObject != None):
-                for mats in BakedMap[4]:
+                for mats in BakedMap[2]:
                     if (mats not in tempData):
                         tempData[mats] = {}
                         tempData[mats][bakeType] = []
-                    for items in BakedMap[4][mats]:
+                    for items in BakedMap[2][mats]:
                         tempData[mats][bakeType].append([
-                            items[0], items[1], items[2], mesh, bakeObj])
+                            items[0], items[1], items[2], items[3], bakeObj])
             if (BakedMap[0]):
                 for objectsSelectCage in selectCageInfo:
                     if (objectsSelectCage):
@@ -881,31 +941,30 @@ def bakeNow():
                     if (objectsSelectCage):
                         objectsSelectCage.location = selectCageLocation[objectsSelectCage]
                         objectsSelectCage.rotation_euler = selectCageRotation[objectsSelectCage]
-            dataToRemoveRestore.append(
-                [bakeType, BakedMap[2], BakedMap[3]])
-
+            if(not BakedMap[0]):
+                dataToRemoveRestore.append([BakedMap[3],BakedMap[4],createdImages])
+            else:
+                dataToRemoveRestore.append([BakedMap[3],BakedMap[4],[]])
         if (bpy.context.scene.BakeMultiple):
+            bpy.ops.object.select_all(action="DESELECT")
             bpy.context.scene.render.bake.use_selected_to_active = False
             for obj in bpy.context.scene.my_items:
                 meshSecond = obj.mesh
                 meshSecond.select_set(True)
                 bpy.context.view_layer.objects.active = mesh
             TempConnection(tempData)
-            for mats in createdMaterial:
-                for bakeType in createdMaterial[mats]:
-                    for items in createdMaterial[mats][bakeType]:
-                        if (type(items[0]) == ShaderNodeTexImage):
-                            for node in createdMaterial[mats][bakeType][1].node_tree.nodes:
-                                node.select = False
-                            items[0].select = True
-                            items[1].node_tree.nodes.active = items[0]
+            for mat in multiplebake:
+                for node in mat.node_tree.nodes:
+                    node.select = False
+                multiplebake[mat].select==True
+                mat.node_tree.nodes.active=multiplebake[mat]
             BakeFinal(bakingSelection, bakeType,
                       multiResModifiers, needMultiRes)
         if (bakeType in needMultiRes):
             for multires in multiResModifiers:
                 multires.levels = multiResModifiers[multires]
         for data in dataToRemoveRestore:
-            RestoreData(data[0], data[1], data[2])
+            RestoreData(data[0],data[1],data[2])
 
     AntiAlias(createdMaterial)
     return createdMaterial
@@ -915,8 +974,7 @@ def TempConnection(createdMaterial):
     tempMat = {}
     for mats in createdMaterial:
         tempMat[mats] = {}
-        createNewMatsData(
-            tempMat, createdMaterial, mats, None, False)
+        TempCreateData(createdMaterial, tempMat,mats)
     ApplyMaterial(tempMat)
 
 
@@ -937,42 +995,41 @@ def AntiAlias(createdMaterial):
     if (bpy.context.scene.AntialiasingScale != 1):
         for mats in createdMaterial:
             for bakeType in createdMaterial[mats]:
-                for items in createdMaterial[mats][bakeType]:
-                    valueNode = items[0]
-                    image = None
-                    if (type(valueNode) == ShaderNodeTexImage):
-                        image = valueNode.image
-                        imagePath = None
-                        isUdim = False
-                    if (image):
-                        savedDate = saveImage(
-                            image, mats, True, bakeType, items[3])
+                valueNode = createdMaterial[mats][bakeType][0]
+                image = None
+                if (type(valueNode) == Image):
+                    image = valueNode
+                    imagePath = None
+                    isUdim = False
+                if (image):
+                    savedDate = saveImage(
+                        image, mats, True, bakeType, createdMaterial[mats][bakeType][1])
 
-                        if (savedDate[2]):
-                            isUdim = True
-                            for tile in savedDate[1]:
-                                imageNew = imageio.v3.imread(
-                                    savedDate[1][tile])
-                                resizedImage = cv2.resize(imageNew,
-                                                          (bpy.context.scene.width, bpy.context.scene.height), interpolation=cv2.INTER_LANCZOS4)
-                                imageio.v3.imwrite(
-                                    savedDate[1][tile], resizedImage)
-                                imagePath = savedDate[1][tile]
-                        else:
-                            imageNew = imageio.v3.imread(savedDate[1])
+                    if (savedDate[2]):
+                        isUdim = True
+                        for tile in savedDate[1]:
+                            imageNew = imageio.v3.imread(
+                                savedDate[1][tile])
                             resizedImage = cv2.resize(imageNew,
-                                                      (bpy.context.scene.width, bpy.context.scene.height), interpolation=cv2.INTER_LANCZOS4)
-                            imageio.v3.imwrite(savedDate[1], resizedImage)
-                            imagePath = savedDate[1]
-                        bpy.data.images.remove(image)
-                        loadedImage = bpy.data.images.load(
-                            imagePath, check_existing=True)
-                        loadedImage.colorspace_settings.name = items[4].space
+                                                        (bpy.context.scene.width, bpy.context.scene.height), interpolation=cv2.INTER_LANCZOS4)
+                            imageio.v3.imwrite(
+                                savedDate[1][tile], resizedImage)
+                            imagePath = savedDate[1][tile]
+                    else:
+                        imageNew = imageio.v3.imread(savedDate[1])
+                        resizedImage = cv2.resize(imageNew,
+                                                    (bpy.context.scene.width, bpy.context.scene.height), interpolation=cv2.INTER_LANCZOS4)
+                        imageio.v3.imwrite(savedDate[1], resizedImage)
+                        imagePath = savedDate[1]
+                    bpy.data.images.remove(image)
+                    loadedImage = bpy.data.images.load(
+                        imagePath, check_existing=True)
+                    loadedImage.colorspace_settings.name = createdMaterial[mats][bakeType][2].space
 
-                        if (isUdim):
-                            loadedImage.source = "TILED"
-                        valueNode.image = loadedImage
-                        loadedImage.name = Path(imagePath).stem
+                    if (isUdim):
+                        loadedImage.source = "TILED"
+                    createdMaterial[mats][bakeType][0] = loadedImage
+                    loadedImage.name = Path(imagePath).stem
 
 
 def RestoreSetting(currentEngine, currentDevice, previousState, modePrev, extrusion, rayDistance, margin):
@@ -985,7 +1042,7 @@ def RestoreSetting(currentEngine, currentDevice, previousState, modePrev, extrus
     try:
         bpy.ops.object.mode_set(mode=modePrev)
     except:
-        pass
+        print("Issue in restoring setting")
 
 
 def BakingSetUp():
@@ -1011,14 +1068,18 @@ def BakingSetUp():
     try:
         bpy.ops.object.mode_set(mode="OBJECT")
     except:
-        pass
+        print("issue in setting pre bake")
     return currentEngine, currentDevice, areaTypeOld, mode, extrusion, currentRaydistance, currentMargin
 
 
 def saveImage(image: Image, mats: Material, isPreBaked: bool, BakeType: str, mesh):
     imageFile = GetFilePath(mats, image.source == "TILED",
                             isPreBaked, BakeType, ".<UDIM>.", mesh, image.name)
-    image.save(filepath=imageFile)
+    image.filepath_raw=imageFile
+    fileFormat=bpy.context.scene.FileFormatBpy[bpy.context.scene.FileFormat]
+    image.file_format=fileFormat
+    image.save()
+    
     if (image.source == "TILED"):
         imagesPath = {}
         for tile in image.tiles:
@@ -1030,9 +1091,6 @@ def saveImage(image: Image, mats: Material, isPreBaked: bool, BakeType: str, mes
 
 
 def GetImage(image: Image, mats: Material, isPreBaked: bool, BakeType: str, mesh):
-    imageFile = GetFilePath(mats, image.source == "TILED",
-                            isPreBaked, BakeType, ".<UDIM>.", mesh, image.name)
-
     if (image.source == "TILED"):
         imagesPath = {}
         for tile in image.tiles:
@@ -1040,6 +1098,8 @@ def GetImage(image: Image, mats: Material, isPreBaked: bool, BakeType: str, mesh
                 mats, True, isPreBaked, BakeType, f".{tile.number}.", mesh, image.name)
         return [image, imagesPath, True]
     else:
+        imageFile = GetFilePath(mats, image.source == "TILED",
+                            isPreBaked, BakeType, ".<UDIM>.", mesh, image.name)
         return [image, imageFile, False]
 
 
@@ -1110,6 +1170,41 @@ def GetColor(udimCount: int, channel, useUdim: bool):
         channelImage = channelImage[:, :, 0]
     return channelImage
 
+def createMat(bakeDate,mats,newCreatedMats):
+    imageMatData={}
+    newCreatedMats[mats]={}
+    for bakeType in bakeDate[mats]:
+        if(bakeType not in newCreatedMats[mats]):
+            newCreatedMats[mats][bakeType]=[]
+        inputs=GetAllNodeMat(mats,bpy.context.scene.inputNode[bakeType],bakeType)
+        for input in inputs:
+            bakeMat:Material=input[1]
+            bakeNode:Node=input[0]
+            if(bakeMat not in imageMatData):
+                imageMatData[bakeMat]={}
+            if(bakeDate[mats][bakeType][0] not in imageMatData[bakeMat]):
+                imageMatData[bakeMat][bakeDate[mats][bakeType][0]]={}
+                if(type(bakeDate[mats][bakeType][0])==Image):
+                    ImageNode:Node=AddRestOfImageNode(bakeDate[mats][bakeType][0],bakeMat)
+                    imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"]=ImageNode
+                    if(bakeDate[mats][bakeType][3]!="FULL"):
+                        seperateNode:Node=bakeMat.node_tree.nodes.new(type="ShaderNodeSeparateColor")
+                        CreatLink(bakeMat,seperateNode,ImageNode.outputs["Color"],"Color")
+                        imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["SeperateNode"]=seperateNode
+                else:
+                    j=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]
+                    imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"]=bakeDate[mats][bakeType][0]
+            if(type(imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"])==ShaderNodeTexImage):
+                if(bakeDate[mats][bakeType][3]!="FULL"):
+                    if(bakeDate[mats][bakeType][3]!="Alpha"):
+                        value=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["SeperateNode"].outputs[bakeDate[mats][bakeType][3]]
+                    else:
+                        value=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"].outputs["Alpha"]
+                else:
+                    value=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"].outputs["Color"]
+            else:
+                value=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"]
+            newCreatedMats[mats][bakeType].append([value,bakeMat,bakeNode,bakeDate[mats][bakeType][1],bakeDate[mats][bakeType][2]])
 
 def bake():
     newCreatedMats = {}
@@ -1143,24 +1238,24 @@ def bake():
     bakeDate = bakeNow()
     for mats in bakeDate:
         newCreatedMats[mats] = {}
-        createdJson[mats.name] = {}
         Fliping(bakeDate, bakeDate[mats], mats)
-        PackTexture(newCreatedMats, bakeDate, mats, createdJson)
-        createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, True)
+        PackTexture(bakeDate, mats)
+        createJson(bakeDate, mats, createdJson)
+        createMat(bakeDate,mats,newCreatedMats)
     for mats in bakeDate:
         for finalBakeType in bakeDate[mats]:
             try:
-                outputList = bakeDate[mats][finalBakeType]
-                for outPutValue in outputList:
-                    outputNode= outPutValue[0]
-                    if (outputNode.type == "TEX_IMAGE"):
-                        saveImage(outputNode.image, mats,
-                                False, finalBakeType, outPutValue[3])
+                outputNode= bakeDate[mats][finalBakeType][0]
+                if (type(outputNode)==Image):
+                    saveImage(outputNode, mats,
+                            False, finalBakeType, bakeDate[mats][finalBakeType][1])
             except Exception as e:
-                print(f"{e}")
-                pass
+                print(f"print issue saving image {e}")
     if (bpy.context.scene.ApplyMaterial or bpy.context.scene.ApplyToCopiedAndHideOriginal):
         ApplyMaterial(newCreatedMats)
+    else:
+        for mats in newCreatedMats:
+            bpy.data.materials.remove(mats)
     os.makedirs(bpy.context.scene.JsonExport, exist_ok=True)
     with open(f"{bpy.context.scene.JsonExport}mapping.json", "w") as jsonFile:
         try:
@@ -1218,86 +1313,79 @@ def ApplyMaterial(newCreatedMats):
 def CheckAddionStep(items, finalBakeType, matsTree):
     requireAdditonSteps = bpy.context.scene.multiResSetup
     oldValue: NodeSocket = items[0]
-    goForward = True
-    try:
+    if (finalBakeType in requireAdditonSteps):
         tempNode = oldValue.node
-        if (tempNode.bl_idname == requireAdditonSteps[finalBakeType]["Node"]):
-            goForward = False
-    except:
-        pass
-    if (finalBakeType in requireAdditonSteps and goForward):
-        value = None
-        if (((type(oldValue) == float) or (type(oldValue) == int))):
-            value = oldValue
-        else:
-            value = requireAdditonSteps[finalBakeType]["InputOutputName"]
+        if (tempNode.bl_idname != requireAdditonSteps[finalBakeType]["Node"]):
+            value = None
+            if (((type(oldValue) == float) or (type(oldValue) == int))):
+                value = oldValue
+            else:
+                value = requireAdditonSteps[finalBakeType]["InputOutputName"]
 
-        try:
-            node = oldValue.node
-            if (node.inputs[requireAdditonSteps[finalBakeType]["OriginInput"]].is_linked):
-                newNode = node.inputs[requireAdditonSteps[finalBakeType]
-                                      ["OriginInput"]].links[0].from_node
-        except:
-            newNode = matsTree.node_tree.nodes.new(
-                type=requireAdditonSteps[finalBakeType]["Node"])
-        CreatLink(matsTree, newNode,
-                  oldValue, value)
-        items[0] = newNode.outputs[requireAdditonSteps[finalBakeType]["Output"]]
+            try:
+                node = oldValue.node
+                if (node.inputs[requireAdditonSteps[finalBakeType]["OriginInput"]].is_linked):
+                    newNode = node.inputs[requireAdditonSteps[finalBakeType]
+                                        ["OriginInput"]].links[0].from_node
+            except:
+                newNode = matsTree.node_tree.nodes.new(
+                    type=requireAdditonSteps[finalBakeType]["Node"])
+            CreatLink(matsTree, newNode,
+                    oldValue, value)
+            items[0] = newNode.outputs[requireAdditonSteps[finalBakeType]["Output"]]
 
 
 def FlipSocket(items, finalBakeType, matsTree):
-    if ((finalBakeType == "Normal" and bpy.context.scene.FlipnormalY) or (finalBakeType == "Roughness" and bpy.context.scene.ConvertRoughnessToSmoothness)):
-        flippingInfo = bpy.context.scene.flippingInfo
-        isAll = all(list(flippingInfo[finalBakeType].values()))
-        if (isAll):
-            invertNode = matsTree.node_tree.nodes.new(type="ShaderNodeInvert")
-            CreatLink(matsTree, invertNode, items[0],
-                      "Color")
-            items[0] = invertNode.outputs["Color"]
-        else:
-            seperateColorNode = matsTree.node_tree.nodes.new(
-                type="ShaderNodeSeparateColor")
-            combineColorNode = matsTree.node_tree.nodes.new(
-                type="ShaderNodeCombineColor")
+    print(f"{items} sdscsdcsdcsd")
+    flippingInfo = {"Red":items[4].Red,"Green":items[4].Green,"Blue":items[4].Blue}
+    if (items[4].Invert):
+        invertNode = matsTree.node_tree.nodes.new(type="ShaderNodeInvert")
+        CreatLink(matsTree, invertNode, items[0],
+                    "Color")
+        items[0] = invertNode.outputs["Color"]
+    elif(items[4].Red or items[4].Green or items[4].Blue):
+        seperateColorNode = matsTree.node_tree.nodes.new(
+            type="ShaderNodeSeparateColor")
+        combineColorNode = matsTree.node_tree.nodes.new(
+            type="ShaderNodeCombineColor")
 
-            CreatLink(matsTree, seperateColorNode, items[0],
-                      "Color")
-            for channel in flippingInfo[finalBakeType]:
-                if (channel != "Alpha"):
-                    if (flippingInfo[finalBakeType][channel]):
-                        invertNode = matsTree.node_tree.nodes.new(
-                            type="ShaderNodeInvert")
-                        CreatLink(matsTree,
-                                  invertNode, seperateColorNode.outputs[channel], "Color")
-                        CreatLink(matsTree, combineColorNode,
-                                  invertNode.outputs["Color"], channel)
-                    else:
-                        CreatLink(matsTree, combineColorNode,
-                                  seperateColorNode.outputs[channel], channel)
-            items[0] = combineColorNode.outputs["Color"]
+        CreatLink(matsTree, seperateColorNode, items[0],
+                    "Color")
+        for channel in flippingInfo:
+            if (channel != "Alpha"):
+                if (flippingInfo[channel]):
+                    invertNode = matsTree.node_tree.nodes.new(
+                        type="ShaderNodeInvert")
+                    CreatLink(matsTree,
+                                invertNode, seperateColorNode.outputs[channel], "Color")
+                    CreatLink(matsTree, combineColorNode,
+                                invertNode.outputs["Color"], channel)
+                else:
+                    CreatLink(matsTree, combineColorNode,
+                                seperateColorNode.outputs[channel], channel)
+        items[0] = combineColorNode.outputs["Color"]
 
 
 def Fliping(bakeDate, bakeTypes, mats):
-    if (bpy.context.scene.FlipnormalY or bpy.context.scene.ConvertRoughnessToSmoothness):
-        for bakeType in bakeTypes:
-            if (bpy.context.scene.FlipnormalY and bakeType == "Normal"):
-                Invert(bakeDate, mats, bakeType)
-            if (bpy.context.scene.ConvertRoughnessToSmoothness and bakeType == "Roughness"):
-                Invert(bakeDate, mats, bakeType)
+    for bakeType in bakeTypes:
+        obj=bakeDate[mats][bakeType][2]
+        if(obj.Red or obj.Green or obj.Blue  or obj.Invert):
+            Invert(bakeDate, mats, bakeType)
 
 
 def Invert(bakeDate, mats, bakeType):
     value = bakeDate[mats][bakeType][0]
+    obj=bakeDate[mats][bakeType][2]
     if ((type(value) == int) or (type(value) == float)):
         bakeDate[mats][bakeType][0] = 1-value
     else:
         imagePath = None
-        currentImage: Image = bakeDate[mats][bakeType][0].image
+        currentImage: Image = bakeDate[mats][bakeType][0]
         savedInfo = saveImage(
-            currentImage, mats, True, bakeType, bakeDate[mats][bakeType][3])
+            currentImage, mats, True, bakeType, bakeDate[mats][bakeType][1])
         bpy.data.images.remove(currentImage)
         name = GetImageName(
-            mats.name, bakeDate[mats][bakeType][3].name, bakeDate[mats][bakeType][4])
+            mats.name, bakeDate[mats][bakeType][1].name, bakeDate[mats][bakeType][2])
         if (savedInfo[2]):
             for tiles in savedInfo[1]:
                 imageToInvert = imageio.v3.imread(
@@ -1305,18 +1393,17 @@ def Invert(bakeDate, mats, bakeType):
                 ndim = imageToInvert.ndim
                 valueToExclue = 1 if Path(
                     savedInfo[1][tiles]).suffix in bpy.context.scene.OneInvert else 255
-                flippingInfo = bpy.context.scene.flippingInfo[bakeType]
 
                 if (ndim == 2):
                     imageToInvert = valueToExclue-imageToInvert
 
                 else:
                     for i in range(ndim):
-                        if (flippingInfo[i]):
+                        if ((obj.Red and i==0) or (obj.Green and i==1) or (obj.Blue and i==2) or obj.Invert):
                             imageToInvert[:, :, i] = valueToExclue - \
                                 imageToInvert[:, :, i]
                 savedLocation = GetFilePath(
-                    mats, True, True, bakeType, tiles, bakeDate[mats][bakeType][3], name)
+                    mats, True, True, bakeType, tiles, bakeDate[mats][bakeType][1], name)
                 imageio.v3.imwrite(savedLocation, imageToInvert)
                 imagePath = savedLocation
         else:
@@ -1325,18 +1412,17 @@ def Invert(bakeDate, mats, bakeType):
             ndim = imageToInvert.ndim
             valueToExclue = 1 if Path(
                 savedInfo[1]).suffix in bpy.context.scene.OneInvert else 255
-            flippingInfo = bpy.context.scene.flippingInfo[bakeType]
 
             if (ndim == 2):
                 imageToInvert = valueToExclue-imageToInvert
 
             else:
                 for i in range(ndim):
-                    if (flippingInfo[i]):
+                    if ((obj.Red and i==0) or (obj.Green and i==1) or (obj.Blue and i==2) or obj.Invert):
                         imageToInvert[:, :, i] = valueToExclue - \
                             imageToInvert[:, :, i]
             savedLocation = GetFilePath(
-                mats, False, True, bakeType, None, bakeDate[mats][bakeType][3], name)
+                mats, False, True, bakeType, None, bakeDate[mats][bakeType][1], name)
             imageio.v3.imwrite(savedLocation, imageToInvert)
             imagePath = savedLocation
 
@@ -1345,8 +1431,8 @@ def Invert(bakeDate, mats, bakeType):
         image.name = Path(imagePath).stem
         if (savedInfo[2]):
             image.source = "TILED"
-        image.colorspace_settings.name = bakeDate[mats][bakeType][4].space
-        bakeDate[mats][bakeType][0].image = image
+        image.colorspace_settings.name = bakeDate[mats][bakeType][2].space
+        bakeDate[mats][bakeType][0] = image
 
 
 def GetBlendings(newCreatedMats, mats):
@@ -1358,37 +1444,33 @@ def GetBlendings(newCreatedMats, mats):
             properties = connectionObj["Properties"]
             inputs = connectionObj["Inputs"]
             alreadyAdded={}
-            bakeBlendBase="Base Color"
-            baseColorInput="Base Color"
-            exist=bakeBlendBase in newCreatedMats[mats]
-            for primaryBake in newCreatedMats[mats][blendingBakesList]:
-                
-                
-                if(exist):
-                    for blendTexture in newCreatedMats[mats][bakeBlendBase]:
-                        if ((blendTexture[1] == primaryBake[1]) and (blendTexture[2] == primaryBake[2])):
-                            j=blendTexture[0]
-                            if((blendTexture[1] in alreadyAdded) and (blendTexture[2] == alreadyAdded[blendTexture[1]][2])):
-                                blendTexture[0]=alreadyAdded[blendTexture[1]][0]
-                            else:
-                                createdNode = GetMixShader(connectionObj, properties, inputs, primaryBake)
-                                CreatLink(primaryBake[1],createdNode,blendTexture[0],"A")
-                                CreatLink(primaryBake[1],createdNode,primaryBake[0],"B")
-                                mats:Material= primaryBake[1]
-                                blendTexture[0]=createdNode.outputs[2]
-                                alreadyAdded[blendTexture[1]]=blendTexture
-                            k=blendTexture[0]
+            deleteNode={}
+            for checkingBake in newCreatedMats[mats][blendingBakesList]:
+                ColorBake=bpy.context.scene.ColorMapNodeInverse[checkingBake[2].type]
+                if(ColorBake not in newCreatedMats[mats]):
+                    nodes=GetAllInputNode(mats,checkingBake[2].type,ColorBake)
+                    for node in nodes:
+                        if(ColorBake not in newCreatedMats[mats]):
+                            newCreatedMats[mats][ColorBake]=[]
+                        dataToAppend=[node[2],node[1],node[0],checkingBake[3],checkingBake[4]]
+                        newCreatedMats[mats][ColorBake].append(dataToAppend)
+                    continue
                 else:
-                    createdNode = GetMixShader(connectionObj, properties, inputs, primaryBake)
-                    inputValue=GetInputValue(baseColorInput,[primaryBake[2],primaryBake[1]])
-                    tempData=primaryBake.copy()
-                    CreatLink(primaryBake[1],createdNode,inputValue,"A")
-                    CreatLink(primaryBake[1],createdNode,primaryBake[0],"B")
-                    tempData[0] = createdNode.outputs[2]
-                    if(baseColorInput not in newCreatedMats[mats]):
-                        newCreatedMats[mats][baseColorInput] = []
-                    newCreatedMats[mats][baseColorInput].append(tempData)
-                    alreadyAdded[primaryBake[1]]=tempData
+                    continue
+            
+            for blendingBake in newCreatedMats[mats][blendingBakesList]:
+                for blendTexture in newCreatedMats[mats][bpy.context.scene.ColorMapNodeInverse[blendingBake[2].type]]:
+                    if ((blendTexture[1] == blendingBake[1]) and (blendTexture[2] == blendingBake[2])):
+                        j=blendTexture[0]
+                        if((blendTexture[1] in alreadyAdded) and (blendTexture[2] == alreadyAdded[blendTexture[1]][2])):
+                            blendTexture[0]=alreadyAdded[blendTexture[1]][0]
+                        else:
+                            createdNode = GetMixShader(connectionObj, properties, inputs, blendingBake)
+                            CreatLink(blendingBake[1],createdNode,blendTexture[0],"A")
+                            CreatLink(blendingBake[1],createdNode,blendingBake[0],"B")
+                            mats:Material= blendingBake[1]
+                            blendTexture[0]=createdNode.outputs[2]
+                            alreadyAdded[blendTexture[1]]=blendTexture
 
             del newCreatedMats[mats][blendingBakesList]
 
@@ -1403,8 +1485,7 @@ def GetMixShader(connectionObj, properties, inputs, primaryBake):
                     
     return createdNode
 
-
-def createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, createJson):
+def TempCreateData(newCreatedMats, bakeDate, mats):
     for bakedTextureType in bakeDate[mats]:
         for items in bakeDate[mats][bakedTextureType]:
             if (bakedTextureType not in newCreatedMats[mats]):
@@ -1414,40 +1495,42 @@ def createNewMatsData(newCreatedMats, bakeDate, mats, createdJson, createJson):
 
             else:
                 outPutToAdd = items[0]
-            valueData = items[0]
-            if (createJson):
-                createdJson[mats.name][bakedTextureType] = {}
-                if (type(valueData) == ShaderNodeTexImage):
-                    value = GetImage(valueData.image, mats, False,
-                                     bakedTextureType, items[3])
-                    if (not value[2]):
-                        valueToAdd = value[1]
-                        createdJson[mats.name][bakedTextureType]["value"] = valueToAdd
-                        createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
-                        createdJson[mats.name][bakedTextureType]["Tiled"] = False
-                        createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
-                        createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
-                    else:
-                        createdJson[mats.name][bakedTextureType]["Tiled"] = True
-                        createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
-                        createdJson[mats.name][bakedTextureType]["value"] = {}
-                        createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
-                        createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
-                        for tile in value[1]:
-                            valueToAdd = value[1][tile]
-                            createdJson[mats.name][bakedTextureType]["value"][tile] = valueToAdd
-                else:
-                    valueToAdd = valueData
-                    createdJson[mats.name][bakedTextureType]["value"] = valueToAdd
-                    createdJson[mats.name][bakedTextureType]["Channel"] = "FULL"
-                    createdJson[mats.name][bakedTextureType]["Tiled"] = False
-                    createdJson[mats.name][bakedTextureType]["Mesh"] = items[3].name
-                    createdJson[mats.name][bakedTextureType]["Shader"]=items[4].shaderNode
             newCreatedMats[mats][bakedTextureType].append([
-                outPutToAdd, items[1], items[2], items[3]])
+                outPutToAdd, items[1], items[2], items[3],items[4]])
+def createJson(bakeDate, mats, createdJson):
+    createdJson[mats.name]={}
+    for bakedTextureType in bakeDate[mats]:
+        valueData = bakeDate[mats][bakedTextureType][0]
+        createdJson[mats.name][bakedTextureType] = {}
+        if (type(valueData) ==Image ):
+            value = GetImage(valueData, mats, False,
+                                bakedTextureType, bakeDate[mats][bakedTextureType][1])
+            if (not value[2]):
+                valueToAdd = value[1]
+                createdJson[mats.name][bakedTextureType]["value"] = valueToAdd
+                createdJson[mats.name][bakedTextureType]["Channel"] = bakeDate[mats][bakedTextureType][3]
+                createdJson[mats.name][bakedTextureType]["Tiled"] = False
+                createdJson[mats.name][bakedTextureType]["Mesh"] = bakeDate[mats][bakedTextureType][1].name
+                createdJson[mats.name][bakedTextureType]["Shader"]=bakeDate[mats][bakedTextureType][2].shaderNode
+            else:
+                createdJson[mats.name][bakedTextureType]["Tiled"] = True
+                createdJson[mats.name][bakedTextureType]["Channel"] = bakeDate[mats][bakedTextureType][3]
+                createdJson[mats.name][bakedTextureType]["value"] = {}
+                createdJson[mats.name][bakedTextureType]["Mesh"] = bakeDate[mats][bakedTextureType][1].name
+                createdJson[mats.name][bakedTextureType]["Shader"]=bakeDate[mats][bakedTextureType][2].shaderNode
+                for tile in value[1]:
+                    valueToAdd = value[1][tile]
+                    createdJson[mats.name][bakedTextureType]["value"][tile] = valueToAdd
+        else:
+            valueToAdd = valueData
+            createdJson[mats.name][bakedTextureType]["value"] = valueToAdd
+            createdJson[mats.name][bakedTextureType]["Channel"] = bakeDate[mats][bakedTextureType][3]
+            createdJson[mats.name][bakedTextureType]["Tiled"] = False
+            createdJson[mats.name][bakedTextureType]["Mesh"] = bakeDate[mats][bakedTextureType][1].name
+            createdJson[mats.name][bakedTextureType]["Shader"]=bakeDate[mats][bakedTextureType][2].shaderNode
 
 
-def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
+def PackTexture(bakeDate, mats):
 
     for packedTexture in bpy.context.scene.my_Packed_Object:
         tiles = []
@@ -1476,19 +1559,18 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
         ChannelList = {redBakeTexture: [redChannel[2], "Red"], greenBakeTexture: [
             greenChannel[2], "Green"], blueBakeTexture: [blueChannel[2], "Blue"], alphaBakeTexture: [alphaChannel[2], "Alpha"]}
         if (redChannel[2]):
-            mesh = bakeDate[mats][redBakeTexture][0][3]
+            mesh = bakeDate[mats][redBakeTexture][1]
         elif (greenChannel[2]):
-            mesh = bakeDate[mats][greenBakeTexture][0][3]
+            mesh = bakeDate[mats][greenBakeTexture][1]
         elif (blueChannel[2]):
-            mesh = bakeDate[mats][alphaBakeTexture][0][3]
+            mesh = bakeDate[mats][alphaBakeTexture][1]
         elif (alphaChannel[2]):
-            mesh = bakeDate[mats][blueBakeTexture][0][3]
+            mesh = bakeDate[mats][blueBakeTexture][1]
         else:
             continue
         tiles = list(
             set(blueChannel[3]+alphaChannel[3]+greenChannel[3]+redChannel[3]))
         if (needPacking):
-            matColorSepNod = {}
             image = None
             if (useUdim):
                 for tile in tiles:
@@ -1503,45 +1585,6 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
                         tile, alphaChannel[0], alphaChannel[1])
                     savedFolder = createPackedImage(
                         alphaCurrentColor, alphaChannel[2], redCurrentColor, greenCurrentColor, blueCurrentColor, mats, True, f".{tile}.", mesh, packedTexture)
-                    for channel in ChannelList:
-
-                        if (ChannelList[channel][0]):
-                            createdJson[mats.name][channel] = {}
-                            name=item[3].name
-                            for item in bakeDate[mats][channel]:
-                                if (type(item[0]) != int and type(item[0]) != float and item[0].bl_idname == "ShaderNodeTexImage"):
-                                    if (item[0].image):
-                                        bpy.data.images.remove(item[0].image)
-                                    item[1].node_tree.nodes.remove(
-                                        item[0])
-                                if (item[1] not in matColorSepNod):
-
-                                    imageTexture: ShaderNodeTexImage = item[1].node_tree.nodes.new(
-                                        type="ShaderNodeTexImage")
-                                    seperateColor: ShaderNodeSeparateColor = item[1].node_tree.nodes.new(
-                                        type="ShaderNodeSeparateColor")
-                                    matColorSepNod[item[1]] = [
-                                        imageTexture, seperateColor]
-                                    CreatLink(item[1], seperateColor,
-                                              imageTexture.outputs["Color"], "Color")
-
-                                if (ChannelList[channel][1] == "Alpha"):
-                                    outPutToAdd = matColorSepNod[item[1]
-                                                                 ][0].outputs["Alpha"]
-                                else:
-                                    outPutToAdd = matColorSepNod[item[1]
-                                                                 ][1].outputs[ChannelList[channel][1]]
-                                if (channel not in newCreatedMats[mats]):
-                                    newCreatedMats[mats][channel] = []
-                                newCreatedMats[mats][channel].append([
-                                    outPutToAdd, item[1], item[2], item[3]])
-                                name=item[3].name
-                            createdJson[mats.name][channel]["Channel"] = ChannelList[channel][1]
-                            createdJson[mats.name][channel]["Tiled"] = True
-                            createdJson[mats.name][channel]["value"] = {}
-                            createdJson[mats.name][channel]["value"][tile] = savedFolder
-                            createdJson[mats.name][channel]["Mesh"] = name
-                            createdJson[mats.name][channel]["Shader"]=bakeDate[mats][channel][4].shaderNode
             else:
                 redCurrentColor = GetColor(
                     None, redChannel[0], redChannel[1])
@@ -1553,50 +1596,18 @@ def PackTexture(newCreatedMats, bakeDate, mats, createdJson):
                     None, alphaChannel[0], alphaChannel[1])
                 savedFolder = createPackedImage(alphaCurrentColor, alphaChannel[2],
                                                 redCurrentColor, greenCurrentColor, blueCurrentColor, mats, False, None, mesh, packedTexture)
-
-                for channel in ChannelList:
-                    if (ChannelList[channel][0]):
-                        createdJson[mats.name][channel] = {}
-                        name=None
-                        for items in bakeDate[mats][channel]:
-                            if (type(items[0]) != int and type(items[0]) != float and items[0].bl_idname == "ShaderNodeTexImage"):
-                                if (items[0].image):
-                                    bpy.data.images.remove(items[0].image)
-                                items[1].node_tree.nodes.remove(
-                                    items[0])
-
-                            if (items[1] not in matColorSepNod):
-                                imageTexture: ShaderNodeTexImage = items[1].node_tree.nodes.new(
-                                    type="ShaderNodeTexImage")
-                                seperateColor: ShaderNodeSeparateColor = items[1].node_tree.nodes.new(
-                                    type="ShaderNodeSeparateColor")
-                                CreatLink(items[1], seperateColor,
-                                          imageTexture.outputs["Color"], "Color")
-                                matColorSepNod[items[1]] = [
-                                    imageTexture, seperateColor]
-
-                            if (ChannelList[channel][1] == "Alpha"):
-                                outPutToAdd = matColorSepNod[items[1]
-                                                             ][0].outputs["Alpha"]
-                            else:
-                                outPutToAdd = matColorSepNod[items[1]
-                                                             ][1].outputs[ChannelList[channel][1]]
-                            if (channel not in newCreatedMats[mats]):
-                                newCreatedMats[mats][channel] = []
-                            newCreatedMats[mats][channel].append(
-                                [outPutToAdd, items[1], items[2], item[3]])
-                            name=item[3].name
-                        createdJson[mats.name][channel]["Channel"] = ChannelList[channel][1]
-                        createdJson[mats.name][channel]["Tiled"] = False
-                        createdJson[mats.name][channel]["value"] = savedFolder
-                        createdJson[mats.name][channel]["Mesh"] = name
-                        createdJson[mats.name][channel]["Shader"]=bakeDate[mats][channel][4].shaderNode
             image = bpy.data.images.load(savedFolder, check_existing=True)
             if (useUdim):
                 image.source = "TILED"
             image.colorspace_settings.name = packedTexture.space
             image.name = Path(savedFolder).stem
-            imageTexture.image = image
+            for channel in ChannelList:
+                if (ChannelList[channel][0]):
+                    imageToRemove=bakeDate[mats][channel][0]
+                    bakeDate[mats][channel][0]=image
+                    bakeDate[mats][channel][3]=ChannelList[channel][1]
+                    if(type(imageToRemove)==Image):
+                        bpy.data.images.remove(imageToRemove)
 
 
 def createPackedImage(alphaCurrentColor, alphaExist, redCurrentColor, greenCurrentColor, blueCurrentColor,  mats, UseUdims, tile, mesh, imageObj):
@@ -1627,12 +1638,13 @@ def GetChannel(mats, bakeTexture, createdMaterial):
         needPacking = False
     else:
         if (bakeTexture in createdMaterial[mats]):
-            channelData = createdMaterial[mats][bakeTexture][0][0]
+            l=createdMaterial[mats][bakeTexture]
+            channelData = createdMaterial[mats][bakeTexture][0]
             needPacking = True
 
             if (type(channelData) == ShaderNodeTexImage):
                 channelData = saveImage(
-                    channelData.image, mats, True, bakeTexture, createdMaterial[mats][bakeTexture][0][3])
+                    channelData.image, mats, True, bakeTexture, createdMaterial[mats][bakeTexture][1])
                 useUdim = channelData[2]
                 if (useUdim):
                     tiles = list(channelData[1])

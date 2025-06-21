@@ -142,8 +142,6 @@ def settingPropertyRegister():
         name="Texture Width", default=1024, description="Width of texture", min=1024)
     bpy.types.Scene.ShadeSmooth = bpy.props.BoolProperty(
         name="Shade Smooth", default=False, description="Turn this on to shade smooth")
-    bpy.types.Scene.ConvertRoughnessToSmoothness = bpy.props.BoolProperty(
-        name="Roughness To Smoothness", default=False, description="Turn this on to convert roughness to smoothness")
     bpy.types.Scene.CopiedMaterialName = bpy.props.StringProperty(
         name="Copied Material Name", default="", description="Specify the name and use the following notation for dynamic value\n[Object]=Object name\n[mat]=material name\n leaving this field empty will add a incrementing number for each copied material")
 
@@ -151,8 +149,6 @@ def settingPropertyRegister():
         name="Use custom folder tree", default=False, description="Turn this on to specify custom folder tree", update=SetFolderTreeDefault)
     bpy.types.Scene.FolderTree = bpy.props.StringProperty(
         name="folder tree", default="/[mat]/[bakeType]", description="Specify the node tree and use the following notation for dynamic value\n[Object]=Object name\n[bakeType]=name of bake type\n[mat]=material name \n /=new folder")
-    bpy.types.Scene.FlipnormalY = bpy.props.BoolProperty(
-        name="Flip Normal Y", default=False, description="Turn this on to flip Y component of normal map")
     bpy.types.Scene.BakeRegardless = bpy.props.BoolProperty(
         name="Bake Regardless", default=False, description="Turn this on to bake texture even if it's not necessary")
     bpy.types.Scene.BakeMulitpleSlots = bpy.props.BoolProperty(
@@ -207,8 +203,6 @@ def settingPropertyUnregister():
     del bpy.types.Scene.height
     del bpy.types.Scene.width
     del bpy.types.Scene.ShadeSmooth
-    del bpy.types.Scene.ConvertRoughnessToSmoothness
-    del bpy.types.Scene.FlipnormalY
     del bpy.types.Scene.BakeRegardless
     del bpy.types.Scene.BakeMulitpleSlots
     del bpy.types.Scene.CheckUVOverLap
