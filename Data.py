@@ -1,8 +1,8 @@
 import bpy
 import os
 
-def Register():
-    bpy.types.Scene.FileFmultiResSetupormatBpy={"tga":"TGA","png":"PNG","exr":"OPEN_EXR","jpg":"JPG"}
+def RegisterData():
+    bpy.types.Scene.FileFormatBpy={"tga":"TGA","png":"PNG","exr":"OPEN_EXR","jpg":"JPG"}
     bpy.types.Scene.greyScale=["Metallic","Roughness","IOR","Alpha","Diffuse Roughness","Subsurface IOR","Subsurface Anisotropy","Specular IOR Level","Anisotropic","Anisotropic Rotation","Transmission Weight","Coat Weight","Coat Roughness","Coat IOR","Sheen Weight","Sheen Roughness","Emission Strength","Thin Film Thickness","Thin Film IOR","Bump Strength","Bump Distance","Filter Width","Bump Height","Multires Displacement","Cavity","Thickness","Ambient Occlusion","Displacement Height","Displacement Midlevel","Displacement Scale","Diffuse Roughness N","Metallic Roughness","Metallic Anisotropy","Metallic Rotation","Emission Strength N","Glass Roughness","Glass IOR","Glossy Roughness","Glossy Anisotropy","Glossy Rotation","Hair Offset N","Hair RoughnessU N", "Hair RoughnessV N","Hair Roughness","Hair Radial Roughness","Hair Coat","Hair IOR","Hair Offset","Hair Random Roughness","Hair Random","Hair Aspect Ratio","Hair Reflection","Hair Transmission","Hair Secondary Reflection","Hair Melanin","Hair Melanin Redness","Hair Random Color","Volume Density", "Volume Anisotropy","Volume Absorption Color","Volume Emission Strength","Volume Blackbody Intensity","Volume Temperature","Refraction Roughness","Refraction IOR","Specular Roughness","Specular Transparency","Specular Clear Coat","Specular Clear Coat Roughness","Subsurface Scattering Scale","Subsurface Scattering Roughness", "Subsurface Scattering Anisotropy","Subsurface Scattering IOR","Sheen Roughness N","Toon Size","Toon Smooth","Volume Absorption Density","Volume Scatter Density", "Volume Scatter Anisotropy","Volume Scatter IOR","Volume Scatter Backscatter", "Volume Scatter Alpha","Volume Scatter Diameter"]
     bpy.types.Scene.ColorMapNode={'Hair Color N': 'BSDF_HAIR',"Diffuse Color":"BSDF_DIFFUSE","Emission Color N":"EMISSION","Glass Color":"BSDF_GLASS","Glossy Color":"BSDF_GLOSSY","Refraction Color":"BSDF_REFRACTION","Sheen Color":"BSDF_SHEEN","Translucent Color":"BSDF_TRANSLUCENT",'Volume Scatter Color': 'VOLUME_SCATTER','Specular Base Color': 'EEVEE_SPECULAR','Base Color': 'BSDF_PRINCIPLED','Volume Color': 'PRINCIPLED_VOLUME','Ray Portal Color': 'BSDF_RAY_PORTAL','Subsurface Scattering Color': 'SUBSURFACE_SCATTERING','Toon Color': 'BSDF_TOON','Transparent Color': 'BSDF_TRANSPARENT','Volume Absorption Color N': 'VOLUME_ABSORPTION','Metallic Color': 'BSDF_METALLIC'}
     bpy.types.Scene.ColorMapNodeInverse={'BSDF_HAIR': 'Hair Color N', 'BSDF_DIFFUSE': 'Diffuse Color', 'EMISSION': 'Emission Color N', 'BSDF_GLASS': 'Glass Color', 'BSDF_GLOSSY': 'Glossy Color', 'BSDF_REFRACTION': 'Refraction Color', 'BSDF_SHEEN': 'Sheen Color', 'BSDF_TRANSLUCENT': 'Translucent Color', 'VOLUME_SCATTER': 'Volume Scatter Color', 'EEVEE_SPECULAR': 'Specular Base Color', 'BSDF_PRINCIPLED': 'Base Color', 'PRINCIPLED_VOLUME': 'Volume Color', 'BSDF_RAY_PORTAL': 'Ray Portal Color', 'SUBSURFACE_SCATTERING': 'Subsurface Scattering Color', 'BSDF_TOON': 'Toon Color', 'BSDF_TRANSPARENT': 'Transparent Color', 'VOLUME_ABSORPTION': 'Volume Absorption Color N', 'BSDF_METALLIC': 'Metallic Color'}
@@ -215,15 +215,15 @@ def Register():
             ]
         }
     }
-    bpy.types.Scene.basePath = bpy.props.StringProperty(
-        name="Base path", default=bpy.path.abspath("//"), description="Base path for saving textures")
-    bpy.types.Scene.JsonExport = f"{bpy.context.scene.basePath}MappingFile/"
+    bpy.types.Scene.basePath = ""
     bpy.types.Scene.giveInputSocket = {"NORMAL_MAP": "Color"}
-    bpy.types.Scene.SavedSettingFolder = "./Setting"
-    bpy.types.Scene.SelectedBakeSavedFolder = "./Bake"
-    bpy.types.Scene.PackedSavedFolder = "./Packed"
+    directory=bpy.utils.extension_path_user(__package__, path="", create=True)
+    bpy.types.Scene.SavedSettingFolder = f"{directory}Setting"
+    bpy.types.Scene.SelectedBakeSavedFolder = f"{directory}Bake"
+    bpy.types.Scene.PackedSavedFolder = f"{directory}Packed"
+    os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
-def Unregister():
+def UnregisterData():
     del bpy.types.Scene.ColorMapNode
     del bpy.types.Scene.greyScale
     del bpy.types.Scene.ColorMapNodeInverse
@@ -235,11 +235,9 @@ def Unregister():
     del bpy.types.Scene.inputNodeNamesUi
     del bpy.types.Scene.OneInvert
     del bpy.types.Scene.basePath
-    del bpy.types.Scene.JsonExport
     del bpy.types.Scene.PackedSavedFolder
     del bpy.types.Scene.SelectedBakeSavedFolder
     del bpy.types.Scene.SavedSettingFolder
-    del bpy.types.Scene.BakeNames
     del bpy.types.Scene.settingsNames
     del bpy.types.Scene.propertyDependentInput
     del bpy.types.Scene.baseNode
@@ -265,5 +263,3 @@ def Unregister():
     del bpy.types.Scene.propertyWithDependants
     del bpy.types.Scene.giveInputSocket
     del bpy.types.Scene.FileFormatBpy
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
-Register()

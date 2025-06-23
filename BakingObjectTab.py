@@ -1,5 +1,5 @@
 import bpy
-
+from bpy.app.handlers import persistent
 
 def ChangeToNone(self, context):
     if (not self.useActiveToSelected):
@@ -80,7 +80,7 @@ class Baking_OT_AddObject(bpy.types.Operator):
 
     def execute(self, context):
         scene = context.scene
-        for mesh in bpy.context.selected_objects:
+        for mesh in context.selected_objects:
             if ((mesh.type == "MESH" and (len(mesh.data.materials) > 0)) and not any(mesh == exisitingMesh.mesh for exisitingMesh in scene.my_items)):
                 new_item = scene.my_items.add()
                 new_item.name = mesh.name
@@ -110,6 +110,8 @@ listOfClass = [MyItem, MY_UL_List, BAKING_PT_LIST,
 class_register, class_unregister = bpy.utils.register_classes_factory(
     listOfClass)
 
+
+@persistent
 def ObjectExist(scene):
     if (scene.my_items and len(scene.my_items) > 0):
         idexes = len(scene.my_items)
@@ -128,7 +130,7 @@ def ObjectExist(scene):
             except:
                 pass
     
-def Register():
+def RegisterObjectTab():
     class_register()
     bpy.types.Scene.my_items = bpy.props.CollectionProperty(type=MyItem)
     bpy.types.Scene.my_items_index = bpy.props.IntProperty(default=0)
@@ -136,12 +138,10 @@ def Register():
         bpy.app.handlers.depsgraph_update_post.append(ObjectExist)
 
 
-def Unregister():
+def UnregisterObjectTab():
     class_unregister()
     del bpy.types.Scene.my_items
     del bpy.types.Scene.my_items_index
     if ObjectExist in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ObjectExist)
 
-
-Register()

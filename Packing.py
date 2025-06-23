@@ -26,7 +26,7 @@ class MyPackedObject(bpy.types.PropertyGroup):
                                  items=GetChannel, default=1)
     Alpha: bpy.props.EnumProperty(name="Red", description="Alpha channel",
                                   items=GetChannel, default=1)
-    naming: bpy.props.StringProperty(name="Item Name", default="[Object]_PackedTexture",
+    Naming: bpy.props.StringProperty(name="Item Name", default="[Object]_PackedTexture",
                                      description="Specify the name and use the following notation for dynamic value\n[Object]=Object name\n[mat]=material name\n[Num]=A number generated if a image with the same name exist(if not specified and a image with the same name exist, then a number would added at the end)")
     space : bpy.props.EnumProperty(name="Color Space", description="Color space of the texture", items=[('ACES2065-1', 'ACES2065-1', 'Color space ACES2065-1'), ('ACEScg', 'ACEScg', 'Color space ACEScg'), ('AgX Base Display P3', 'AgX Base Display P3', 'Color space AgX Base Display P3'), ('AgX Base Rec.1886', 'AgX Base Rec.1886', 'Color space AgX Base Rec.1886'), ('AgX Base Rec.2020', 'AgX Base Rec.2020', 'Color space AgX Base Rec.2020'), ('AgX Base sRGB', 'AgX Base sRGB', 'Color space AgX Base sRGB'), ('AgX Log', 'AgX Log', 'Color space AgX Log'), ('Display P3', 'Display P3', 'Color space Display P3'), ('Filmic Log', 'Filmic Log', 'Color space Filmic Log'), ('Filmic sRGB', 'Filmic sRGB', 'Color space Filmic sRGB'), (
         'Khronos PBR Neutral sRGB', 'Khronos PBR Neutral sRGB', 'Color space Khronos PBR Neutral sRGB'), ('Linear CIE-XYZ D65', 'Linear CIE-XYZ D65', 'Color space Linear CIE-XYZ D65'), ('Linear CIE-XYZ E', 'Linear CIE-XYZ E', 'Color space Linear CIE-XYZ E'), ('Linear DCI-P3 D65', 'Linear DCI-P3 D65', 'Color space Linear DCI-P3 D65'), ('Linear FilmLight E-Gamut', 'Linear FilmLight E-Gamut', 'Color space Linear FilmLight E-Gamut'), ('Linear Rec.2020', 'Linear Rec.2020', 'Color space Linear Rec.2020'), ('Linear Rec.709', 'Linear Rec.709', 'Color space Linear Rec.709'), ('Non-Color', 'Non-Color', 'Color space Non-Color'), ('Rec.1886', 'Rec.1886', 'Color space Rec.1886'), ('Rec.2020', 'Rec.2020', 'Color space Rec.2020'), ('sRGB', 'sRGB', 'Color space sRGB')], default="Non-Color")
@@ -59,7 +59,7 @@ class PACKING_PT_LIST(bpy.types.Panel):
                               text="Remove Texture", icon="REMOVE")
         presetRow = column.row()
         presetRow.prop(scene, "current_packing_preset_name",
-                       text="Packing preset name")
+                       text="preset")
         presetRow.prop(scene, "current_packing_preset",
                        text="Current packing preset")
         presetRow.operator("packing.save",
@@ -119,7 +119,7 @@ def GetSavedPackingPreset(self, context):
     files = [f for f in os.listdir(folder)]
     for file in files:
         createdEnums.append(
-            (f"{folder}/{file}", Path(file).stem, f"Current setting is {file}"))
+            (f"{folder}\\{file}", Path(file).stem, f"Current setting is {file}"))
     return createdEnums
 
 
@@ -136,7 +136,7 @@ def ApplyCurrentPacking(self, context):
                 new_item.Green = tempObj[property]["Green"]
                 new_item.Blue = tempObj[property]["Blue"]
                 new_item.Alpha = tempObj[property]["Alpha"]
-                new_item.Name = property
+                new_item.name = property
                 new_item.Naming = tempObj[property]["Naming"]
                 new_item.space = tempObj[property]["space"]
                 new_item.float = tempObj[property]["float"]
@@ -161,9 +161,9 @@ class Packing_OT_Save(bpy.types.Operator):
             tempDict[packedObject.name] = {
                 "Red": packedObject.Red, "Green": packedObject.Green, "Blue": packedObject.Blue, "Alpha": packedObject.Alpha, "Naming": packedObject.Naming, "space": packedObject.space, "float": packedObject.float}
         os.makedirs("folder", exist_ok=True)
-        with open(f"./{folder}/{scene.current_packing_preset_name}.json", "w") as jsonFile:
+        with open(f"{folder}\\{scene.current_packing_preset_name}.json", "w") as jsonFile:
             json.dump(tempDict, jsonFile)
-        scene.current_packing_preset = f"{folder}/{scene.current_packing_preset_name}.json"
+        scene.current_packing_preset = f"{folder}\\{scene.current_packing_preset_name}.json"
         return {'FINISHED'}
 
 
@@ -173,23 +173,19 @@ class_register, class_unregister = bpy.utils.register_classes_factory(
     listOfClass)
 
 
-def Register():
+def RegisterPackingTab():
     class_register()
     bpy.types.Scene.current_packing_preset_name = bpy.props.StringProperty(
-        name="Packing preset name", description="Enter the name of current packing preset to be saved")
+        name="preset", description="Enter the name of current packing preset to be saved")
     bpy.types.Scene.current_packing_preset = bpy.props.EnumProperty(
         name="Current packing preset", description="Current packing preset", update=ApplyCurrentPacking, items=GetSavedPackingPreset)
     bpy.types.Scene.my_Packed_Object = bpy.props.CollectionProperty(
         type=MyPackedObject)
     bpy.types.Scene.my_Packed_Object_index = bpy.props.IntProperty(default=0)
-    ApplyCurrentPacking(None, bpy.context)
 
-
-def Unregister():
+def UnregisterPackingTab():
     class_unregister()
     del bpy.types.Scene.current_packing_preset_name
     del bpy.types.Scene.my_Packed_Object
     del bpy.types.Scene.my_Packed_Object_index
 
-
-Register()

@@ -25,7 +25,7 @@ def getSavedSetting(self, context):
     files = [f for f in os.listdir(folder)]
     for file in files:
         createdEnums.append(
-            (f"{folder}/{file}", Path(file).stem, f"Current setting is {file}"))
+            (f"{folder}\\{file}", Path(file).stem, f"Current setting is {file}"))
     return createdEnums
 
 
@@ -61,11 +61,11 @@ class SETTING_PT_PANEL(bpy.types.Panel):
                     scene, names, toggle=True, text=scene.settingsNames[names])
         column.separator()
         currentSettingRow = column.row()
-        currentSettingRow.prop(scene, "settingName", text="setting Name")
+        currentSettingRow.prop(scene, "settingName", text="preset")
         currentSettingRow.prop(scene, "SavedSettings", text="Current setting")
         filePathRow = column.row()
         filePathRow.operator("basepath.open_filebrowser",
-                             text="Base path for texture", icon="FILEBROWSER")
+                             text="Texture path", icon="FILEBROWSER")
         saveSetting = column.row()
         saveSetting.operator("setting.save", text="Save current setting")
         if (scene.UseCustomFolderTree):
@@ -93,9 +93,9 @@ class Setting_OT_Save(bpy.types.Operator):
                 scene, setting)
             tempDictionary[setting] = settingValue
         os.makedirs("folder", exist_ok=True)
-        with open(f"./{folder}/{scene.settingName}.json", "w") as jsonFile:
+        with open(f"{folder}\\{scene.settingName}.json", "w") as jsonFile:
             json.dump(tempDictionary, jsonFile)
-        scene.SavedSettings = f"{folder}/{scene.settingName}.json"
+        scene.SavedSettings = f"{folder}\\{scene.settingName}.json"
         return {'FINISHED'}
 
 
@@ -117,7 +117,7 @@ class_register, class_unregister = bpy.utils.register_classes_factory(
     listOfClass)
 
 
-def Register():
+def RegisterSettingTab():
     class_register()
     settingPropertyRegister()
 
@@ -126,7 +126,7 @@ def settingPropertyRegister():
 
     
     bpy.types.Scene.settingName = bpy.props.StringProperty(
-        name="setting name", default="Setting1", description="Enter the name of current setting to be saved")
+        name="preset", default="Setting1", description="Enter the name of current setting to be saved")
     bpy.types.Scene.margin = bpy.props.IntProperty(
         name="Texture margin", default=16, description="Margin of texture", min=0, max=64)
     bpy.types.Scene.height = bpy.props.IntProperty(
@@ -148,7 +148,7 @@ def settingPropertyRegister():
     bpy.types.Scene.UseCustomFolderTree = bpy.props.BoolProperty(
         name="Use custom folder tree", default=False, description="Turn this on to specify custom folder tree", update=SetFolderTreeDefault)
     bpy.types.Scene.FolderTree = bpy.props.StringProperty(
-        name="folder tree", default="/[mat]/[bakeType]", description="Specify the node tree and use the following notation for dynamic value\n[Object]=Object name\n[bakeType]=name of bake type\n[mat]=material name \n /=new folder")
+        name="folder tree", default="\\[mat]\\[bakeType]", description="Specify the node tree and use the following notation for dynamic value\n[Object]=Object name\n[bakeType]=name of bake type\n[mat]=material name \n \\=new folder")
     bpy.types.Scene.BakeRegardless = bpy.props.BoolProperty(
         name="Bake Regardless", default=False, description="Turn this on to bake texture even if it's not necessary")
     bpy.types.Scene.BakeMulitpleSlots = bpy.props.BoolProperty(
@@ -182,10 +182,9 @@ def settingPropertyRegister():
         name="Anti aliasing", description="Less then 1 does downscaling, greater then 1 does upscaling,and at 1 does nothing", default=1, min=0, max=2)
     bpy.types.Scene.UVIslandMargin = bpy.props.FloatProperty(
         name="UV Island Margin", description="Margin for uv island if generating", min=0)
-    ApplyCurrentSetting(None, bpy.context)
 
 
-def Unregister():
+def UnregisterSettingTab():
     class_unregister()
     del bpy.types.Scene.packObject
 
@@ -219,6 +218,3 @@ def settingPropertyUnregister():
     del bpy.types.Scene.ApplyToCopiedAndHideOriginal
     del bpy.types.Scene.CopyMaterial
     del bpy.types.Scene.AntialiasingScale
-
-
-Register()

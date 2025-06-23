@@ -2,7 +2,7 @@ import bpy
 from pathlib import Path
 import os
 import json
-
+from bpy.app.handlers import persistent
 
 def GetSavedBaking(self, context):
     createdEnums = [("None", "None", "None")]
@@ -11,7 +11,7 @@ def GetSavedBaking(self, context):
     files = [f for f in os.listdir(folder)]
     for file in files:
         createdEnums.append(
-            (f"{folder}/{file}", Path(file).stem, f"Current baking preset is {file}"))
+            (f"{folder}\\{file}", Path(file).stem, f"Current baking preset is {file}"))
     return createdEnums
 
 
@@ -102,7 +102,7 @@ class BAKE_OT_Save(bpy.types.Operator):
             tempDictionary[bake.name] = {
                 "Naming": bake.naming, "enabled": bake.enabled, "space": bake.space, "float": bake.float, "shaderNode": bake.shaderNode,"DName": bake.DName,"Red":bake.Red,"Green":bake.Green,"Blue":bake.Blue,"Invert":bake.Invert}
         os.makedirs("folder", exist_ok=True)
-        with open(f"./{folder}/{scene.BakePresetName}.json", "w") as jsonFile:
+        with open(f"{folder}\\{scene.BakePresetName}.json", "w") as jsonFile:
             json.dump(tempDictionary, jsonFile)
         return {'FINISHED'}
 
@@ -126,8 +126,21 @@ class CREATE_OT_BAKE(bpy.types.Operator):
             else:
                 new_item.space = "Non-Color"
         return {'FINISHED'}
-
-
+@persistent
+def GetBakingItem(scene):
+    if(len(scene.bakingList)<=0):
+        for name in scene.BakeTypes:
+            new_item = scene.bakingList.add()
+            new_item.name = name
+            new_item.naming = f"[Object]_{new_item.name}"
+            new_item.DName = scene.BakeTypes[name]
+            new_item.shaderNode = scene.inputNodeNamesUi[name]
+            scene.bakingListIndex = len(scene.bakingList)-1
+            if (name in scene.ColorMaps):
+                new_item.space = "sRGB"
+            else:
+                new_item.space = "Non-Color"
+    return None
 class BAKING_UL_List(bpy.types.UIList):
     bl_idname = "BAKING_UL_List"
 
@@ -164,7 +177,7 @@ class_register_first,  class_unregister_first = bpy.utils.register_classes_facto
     listOfClassfFirst)
 
 
-def Register():
+def RegisterBakeTab():
     class_register_first()
     bpy.types.Scene.bakingList = bpy.props.CollectionProperty(
         type=BakeObject)
@@ -175,18 +188,17 @@ def Register():
     bpy.types.Scene.BakePresetName = bpy.props.StringProperty(
         name="", default="", description="Enter the name of current baking preset to be saved")
     class_register_second()
-    bpy.ops.create.bake()
+    if(GetBakingItem not in bpy.app.handlers.depsgraph_update_pre):
+        bpy.app.handlers.depsgraph_update_pre.append(GetBakingItem)
 
-    ApplyCurrentBakingPreset(None, bpy.context)
 
-
-def Unregister():
+def UnregisterBakeTab():
     del bpy.types.Scene.BakePresetName
     del bpy.types.Scene.SavedBakePreset
     del bpy.types.Scene.bakingList
     del bpy.types.Scene.bakingListIndex
     class_unregister_first()
     class_unregister_second()
+    if(GetBakingItem in bpy.app.handlers.depsgraph_update_pre):
+        bpy.app.handlers.depsgraph_update_pre.remove(GetBakingItem)
 
-
-Register()

@@ -1123,10 +1123,10 @@ def GetFilePath(mats: Material, isUdim: bool, isPreBaked: bool, BakeType: str, t
     extension = bpy.context.scene.FileFormat
 
     if (isUdim):
-        imageFile = f"{pathToUseDir}/" + \
+        imageFile = f"{pathToUseDir}\\" + \
             f"{fileName}.{tileInfo}.{extension}"
     else:
-        imageFile = f"{pathToUseDir}/" + \
+        imageFile = f"{pathToUseDir}\\" + \
             f"{fileName}.{extension}"
     return imageFile
 
@@ -1206,7 +1206,7 @@ def createMat(bakeDate,mats,newCreatedMats):
                 value=imageMatData[bakeMat][bakeDate[mats][bakeType][0]]["ImageNode"]
             newCreatedMats[mats][bakeType].append([value,bakeMat,bakeNode,bakeDate[mats][bakeType][1],bakeDate[mats][bakeType][2]])
 
-def bake():
+def Start():
     newCreatedMats = {}
     createdJson = {}
     previousMatDate = {}
@@ -1256,8 +1256,9 @@ def bake():
     else:
         for mats in newCreatedMats:
             bpy.data.materials.remove(mats)
-    os.makedirs(bpy.context.scene.JsonExport, exist_ok=True)
-    with open(f"{bpy.context.scene.JsonExport}mapping.json", "w") as jsonFile:
+    jsonExportPath=f"{bpy.context.scene.basePath}MappingFile\\"
+    os.makedirs(jsonExportPath, exist_ok=True)
+    with open(f"{jsonExportPath}mapping.json", "w") as jsonFile:
         try:
             data = json.load(jsonFile)
             data.update(createdJson)
@@ -1654,4 +1655,50 @@ def GetChannel(mats, bakeTexture, createdMaterial):
     return [channelData, useUdim, needPacking, tiles]
 
 
-bake()
+
+class MAIN_PT_PANEL(bpy.types.Panel):
+    bl_label = "Main"
+    bl_idname = "SCENE_PT_Main"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Texture Manager"
+
+    def draw(self, context):
+        scene = context.scene
+        layout = self.layout
+        layout.operator("Main.now",text="Start")
+        
+class Main_OT_Now(bpy.types.Operator):
+    bl_idname = "main.now"
+    bl_label = "main Operator"
+    bl_description = "Click Start"
+    def execute(self, context):
+        if(bpy.context.scene.basePath==""):
+            if(bpy.path.abspath("//")!=""):
+                bpy.context.scene.basePath=bpy.path.abspath("//")
+            else:
+                bpy.ops.warning.path()
+        else:
+            Start()
+        return {'FINISHED'}
+class Warning_OT_Path(bpy.types.Operator):
+    """Tooltip"""
+    bl_idname = "warning.path"
+    bl_label = "Warning Path Operator"
+
+
+    def execute(self, context):
+        self.report({'ERROR'}, 'Please select texture path')
+        return {'FINISHED'}
+
+listOfClass = [Warning_OT_Path,Main_OT_Now, MAIN_PT_PANEL]
+class_register, class_unregister = bpy.utils.register_classes_factory(
+    listOfClass)
+
+
+def registerStartTab():
+    class_register()
+
+def UnregisterStartTab():
+    class_unregister()
+
