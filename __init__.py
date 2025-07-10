@@ -1,29 +1,3 @@
-
-from .Data import RegisterData,UnregisterData
-from .BakingObjectTab import RegisterObjectTab,UnregisterObjectTab
-from .SelectedBake import RegisterBakeTab,UnregisterBakeTab
-from .Packing import RegisterPackingTab,UnregisterPackingTab
-from .SettingTab import RegisterSettingTab,UnregisterSettingTab
-from .Core import registerStartTab,UnregisterStartTab
-import os
-import bpy
-def register():
-    RegisterData()
-    RegisterObjectTab()
-    RegisterBakeTab()
-    RegisterPackingTab()
-    RegisterSettingTab()
-    registerStartTab()
-def unregister():
-    try:
-        os.rmdir(bpy.context.scene.SavedSettingFolder)
-        os.rmdir(bpy.context.scene.SelectedBakeSavedFolder)
-        os.rmdir(bpy.context.scene.PackedSavedFolder)
-    except:
-        pass
-    UnregisterData()
-    UnregisterObjectTab()
-    UnregisterBakeTab()
-    UnregisterPackingTab()
-    UnregisterSettingTab()
-    UnregisterStartTab()
+version https://git-lfs.github.com/spec/v1
+oid sha256:7d7d6ffb8b070141398b8d8b619b37dd93ffc782e2962ce783770015bad54e6f
+size 931
